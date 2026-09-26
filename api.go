@@ -83,7 +83,7 @@ func (server api) topDomains(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (server api) topDomainGroups(w http.ResponseWriter, _ *http.Request) {
-	counts, err := queryDomainCounts(server.db, server.cutoff())
+	counts, err := queryDomainCounts(server.db, server.cutoff(), "")
 	if err != nil {
 		dbError(w, err)
 		return
@@ -102,16 +102,10 @@ func (server api) domainGroupMembers(w http.ResponseWriter, request *http.Reques
 		return
 	}
 	_, pageSize, offset := pagination(request, 20, 200)
-	counts, err := queryDomainCounts(server.db, server.cutoff())
+	members, err := queryDomainCounts(server.db, server.cutoff(), group)
 	if err != nil {
 		dbError(w, err)
 		return
-	}
-	members := make([]DomainCount, 0)
-	for _, count := range counts {
-		if registrableDomain(count.Domain) == group {
-			members = append(members, count)
-		}
 	}
 	sort.Slice(members, func(i, j int) bool {
 		if members[i].Count == members[j].Count {

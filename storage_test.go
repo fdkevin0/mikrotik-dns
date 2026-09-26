@@ -111,6 +111,46 @@ func TestGroupDomainCounts(t *testing.T) {
 	}
 }
 
+func TestQueryDomainCountsForGroup(t *testing.T) {
+	db, err := sql.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if err := prepareDB(db); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, entry := range []struct {
+		domain    string
+		timestamp int64
+	}{
+		{"amazonaws.com", 100},
+		{"api.amazonaws.com", 100},
+		{"api.amazonaws.com", 100},
+		{"old.amazonaws.com", 50},
+		{"foo.s3.amazonaws.com", 100},
+		{"notamazonaws.com", 100},
+	} {
+		if _, err := db.Exec(`INSERT INTO queries(timestamp, client, domain, type, query_id, source, reverse_domain) VALUES(?,?,?,?,?,?,?)`,
+			entry.timestamp, "client", entry.domain, "A", 1, "router", reverseDomain(entry.domain)); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	counts, err := queryDomainCounts(db, 100, "amazonaws.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := make(map[string]int)
+	for _, count := range counts {
+		got[count.Domain] = count.Count
+	}
+	if len(got) != 2 || got["amazonaws.com"] != 1 || got["api.amazonaws.com"] != 2 {
+		t.Fatalf("group counts = %v, want amazonaws.com:1 and api.amazonaws.com:2", got)
+	}
+}
+
 func TestPrepareDBCreatesIndexes(t *testing.T) {
 	db, err := sql.Open("sqlite3", ":memory:")
 	if err != nil {

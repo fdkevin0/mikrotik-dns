@@ -118,8 +118,14 @@ func reverseDomain(domain string) string {
 	return string(runes)
 }
 
-func queryDomainCounts(db *sql.DB, cutoff int64) ([]DomainCount, error) {
-	rows, err := db.Query(`SELECT domain, COUNT(*) FROM queries WHERE timestamp >= ? GROUP BY domain`, cutoff)
+func queryDomainCounts(db *sql.DB, cutoff int64, group string) ([]DomainCount, error) {
+	query := `SELECT domain, COUNT(*) FROM queries WHERE timestamp >= ?`
+	args := []any{cutoff}
+	if group != "" {
+		query += ` AND ` + suffixIDsSQL()
+		args = append(args, suffixArgs(group)...)
+	}
+	rows, err := db.Query(query+` GROUP BY domain`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -130,7 +136,9 @@ func queryDomainCounts(db *sql.DB, cutoff int64) ([]DomainCount, error) {
 		if err := rows.Scan(&count.Domain, &count.Count); err != nil {
 			return nil, err
 		}
-		counts = append(counts, count)
+		if group == "" || registrableDomain(count.Domain) == group {
+			counts = append(counts, count)
+		}
 	}
 	return counts, rows.Err()
 }
@@ -242,11 +250,15 @@ func queryRecords(db *sql.DB, filter QueryFilter) ([]QueryRecord, error) {
 			args = append(args, domain)
 		}
 	}
-	for column, value := range map[string]string{"source": filter.Source, "client": filter.Client, "type": filter.Type} {
+	for column, value := range map[string]string{"source": filter.Source, "client": filter.Client} {
 		if value != "" {
-			conditions = append(conditions, column+` = ? COLLATE NOCASE`)
+			conditions = append(conditions, column+` = ?`)
 			args = append(args, value)
 		}
+	}
+	if filter.Type != "" {
+		conditions = append(conditions, `type = ? COLLATE NOCASE`)
+		args = append(args, filter.Type)
 	}
 	if filter.QueryID != nil {
 		conditions = append(conditions, `query_id = ?`)
