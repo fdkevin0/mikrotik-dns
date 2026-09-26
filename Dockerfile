@@ -1,5 +1,5 @@
 # ---------- Frontend build ----------
-FROM node:20-alpine AS web-build
+FROM node:26-alpine AS web-build
 WORKDIR /app/page
 # Copy package files first for better caching
 COPY page/package*.json ./
@@ -11,7 +11,7 @@ ENV BACKEND_URL=http://127.0.0.1:8080
 RUN npm run build
 
 # ---------- Backend build ----------
-FROM golang:1.24-alpine AS api-build
+FROM golang:1.27-alpine AS api-build
 WORKDIR /src
 # Install build dependencies for CGO + SQLite
 RUN apk add --no-cache gcc musl-dev sqlite-dev
@@ -23,7 +23,7 @@ ENV CGO_ENABLED=1 GOOS=linux
 RUN go build -o /out/mikrotik-dns ./main.go
 
 # ---------- Runtime ----------
-FROM node:20-alpine
+FROM node:26-alpine
 WORKDIR /app
 
 # Install runtime dependencies

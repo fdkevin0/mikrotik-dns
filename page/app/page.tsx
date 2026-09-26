@@ -26,7 +26,7 @@ import {
   Globe,
   Search,
   RefreshCw,
-  Github,
+  Code2,
   Play,
   Pause,
   Clock,
@@ -366,7 +366,7 @@ export default function DNSDashboard() {
                 }
                 aria-label="Open GitHub repository"
               >
-                <Github className="h-4 w-4" />
+                <Code2 className="h-4 w-4" />
               </Button>
 
               <div className="flex h-10 items-center gap-2 rounded-md border bg-card px-2">

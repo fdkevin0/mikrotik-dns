@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { Activity, Users, Globe, Search, RefreshCw, Github, Play, Pause, Clock, TrendingUp, Shield, AlertTriangle, Zap, Network, BarChart3, Wifi } from "lucide-react"
+import { Activity, Users, Globe, Search, RefreshCw, Play, Pause, Clock, TrendingUp, Shield, AlertTriangle, Zap, Network, BarChart3, Wifi } from "lucide-react"
 import { AnimatedNumber } from "@/components/animated-number"
 import { DarkModeSwitch } from "@/components/dark-mode-switch"
 
