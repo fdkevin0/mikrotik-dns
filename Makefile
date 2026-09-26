@@ -35,7 +35,7 @@ help:
 # Backend commands
 build-backend:
 	@echo "🏗️  Building backend..."
-	go build -ldflags="-s -w" -o mikrotik-dns main.go
+	go build -ldflags="-s -w" -o mikrotik-dns .
 	@echo "✅ Backend built successfully!"
 
 run-backend: build-backend
@@ -44,7 +44,7 @@ run-backend: build-backend
 
 dev-backend:
 	@echo "🔧 Starting backend in development mode..."
-	go run main.go
+	go run .
 
 # Frontend commands
 install:

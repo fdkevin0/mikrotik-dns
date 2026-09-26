@@ -11,6 +11,7 @@ services:
     environment:
       - DNS_SERVER=${DNS_SERVER:-}
       - DATABASE_PATH=/data/queries.db
+      - DATA_RETENTION_HOURS=${DATA_RETENTION_HOURS:-24}
       - BACKEND_URL=http://127.0.0.1:8080
       - PORT=3000
       - NODE_ENV=production

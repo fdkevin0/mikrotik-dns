@@ -28,7 +28,7 @@ RUN go mod download
 COPY main.go ./
 # Build with CGO enabled for SQLite
 ENV CGO_ENABLED=1 GOOS=linux
-RUN go build -o /out/mikrotik-dns ./main.go
+RUN go build -o /out/mikrotik-dns .
 
 # ---------- Runtime ----------
 FROM node:26-alpine
@@ -49,6 +49,7 @@ COPY --from=frontend /app/page/.next/static ./page/.next/static
 ENV PORT=3000 \
     NODE_ENV=production \
     DATABASE_PATH=/data/queries.db \
+    DATA_RETENTION_HOURS=24 \
     BACKEND_URL=http://127.0.0.1:8080
 
 # Create data volume
