@@ -25,7 +25,7 @@ WORKDIR /src
 RUN apk add --no-cache gcc musl-dev sqlite-dev
 COPY go.mod go.sum ./
 RUN go mod download
-COPY main.go ./
+COPY *.go ./
 # Build with CGO enabled for SQLite
 ENV CGO_ENABLED=1 GOOS=linux
 RUN go build -o /out/mikrotik-dns .
