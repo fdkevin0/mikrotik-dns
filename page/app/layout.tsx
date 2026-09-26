@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { GeistSans } from "geist/font/sans";
 import { GeistMono } from "geist/font/mono";
-import { ThemeProvider } from "@/components/theme-provider";
+import { ThemeProvider } from "next-themes";
 import { Toaster } from "@/components/ui/toaster";
 import "./globals.css";
 
@@ -28,7 +28,7 @@ html {
         `}</style>
       </head>
       <body className="min-h-screen bg-background text-foreground antialiased">
-        <ThemeProvider defaultTheme="light" storageKey="mikrotik-dns-theme">
+        <ThemeProvider attribute="class" defaultTheme="light" enableSystem storageKey="mikrotik-dns-theme" disableTransitionOnChange={false}>
           {children}
           <Toaster />
         </ThemeProvider>
