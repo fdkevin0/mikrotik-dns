@@ -9,7 +9,6 @@ export const metadata: Metadata = {
   title: "MikroTik DNS Analytics",
   description:
     "Real-time DNS query analytics and monitoring dashboard for MikroTik routers",
-  generator: "v0.dev",
 };
 
 export default function RootLayout({

@@ -11,6 +11,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
+import { Progress } from "@/components/ui/progress";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Select,
@@ -87,6 +88,13 @@ interface DomainWithResolution {
   resolution: DNSResolution;
 }
 
+const resolutionStatusStyles: Record<string, [string, string]> = {
+  success: ["bg-green-50 text-green-700 dark:bg-green-950 dark:text-green-300", "✓"],
+  blocked: ["bg-red-50 text-red-700 dark:bg-red-950 dark:text-red-300", "✗"],
+  error: ["bg-orange-50 text-orange-700 dark:bg-orange-950 dark:text-orange-300", "⚠"],
+  default: ["bg-muted text-muted-foreground", "?"],
+};
+
 export default function DNSDashboard() {
   const { toast } = useToast();
   const [topDomains, setTopDomains] = useState<DomainData[]>([]);
@@ -117,7 +125,6 @@ export default function DNSDashboard() {
   const [activeTab, setActiveTab] = useState("overview");
 
   const fetchData = async () => {
-    const apiUrl = "";
     setLoading(true);
     try {
       const [
@@ -129,13 +136,13 @@ export default function DNSDashboard() {
         qpsRes,
         ipvRes,
       ] = await Promise.all([
-        fetch(`${apiUrl}/api/top-domains`),
-        fetch(`${apiUrl}/api/query-types`),
-        fetch(`${apiUrl}/api/clients`),
-        fetch(`${apiUrl}/api/unique-clients-count`),
-        fetch(`${apiUrl}/api/unique-domains-count`),
-        fetch(`${apiUrl}/api/queries-per-minute`),
-        fetch(`${apiUrl}/api/ipv4-vs-ipv6`),
+        fetch("/api/top-domains"),
+        fetch("/api/query-types"),
+        fetch("/api/clients"),
+        fetch("/api/unique-clients-count"),
+        fetch("/api/unique-domains-count"),
+        fetch("/api/queries-per-minute"),
+        fetch("/api/ipv4-vs-ipv6"),
       ]);
 
       const domainsData = await domainsRes.json();
@@ -172,10 +179,9 @@ export default function DNSDashboard() {
   };
 
   const fetchClientQueries = async (client: string, page = 1) => {
-    const apiUrl = "";
     try {
       const res = await fetch(
-        `${apiUrl}/api/client-queries?client=${client}&page=${page}&page_size=20`,
+        `/api/client-queries?client=${client}&page=${page}&page_size=20`,
       );
       const data = await res.json();
       setClientQueries(Array.isArray(data) ? data : []);
@@ -185,10 +191,9 @@ export default function DNSDashboard() {
   };
 
   const fetchAllQueries = async (page = 1) => {
-    const apiUrl = "";
     try {
       const res = await fetch(
-        `${apiUrl}/api/all-queries?page=${page}&page_size=50`,
+        `/api/all-queries?page=${page}&page_size=50`,
       );
       const data = await res.json();
       setAllQueries(Array.isArray(data) ? data : []);
@@ -286,7 +291,6 @@ export default function DNSDashboard() {
       return;
     }
 
-    const apiUrl = "";
     setIsSearching(true);
     try {
       const params = new URLSearchParams({
@@ -295,7 +299,7 @@ export default function DNSDashboard() {
         page: page.toString(),
         page_size: "20",
       });
-      const res = await fetch(`${apiUrl}/api/domain-queries?${params}`);
+      const res = await fetch(`/api/domain-queries?${params}`);
       const data = await res.json();
       setSearchResults(Array.isArray(data) ? data : []);
     } catch (error) {
@@ -307,10 +311,9 @@ export default function DNSDashboard() {
   };
 
   const fetchDomainClients = async (domain: string, page = 1) => {
-    const apiUrl = "";
     try {
       const res = await fetch(
-        `${apiUrl}/api/domain-clients?domain=${domain}&page=${page}&page_size=20`,
+        `/api/domain-clients?domain=${domain}&page=${page}&page_size=20`,
       );
       const data = await res.json();
       setDomainClients(Array.isArray(data) ? data : []);
@@ -320,61 +323,62 @@ export default function DNSDashboard() {
     }
   };
 
-  const getTotalQueries = () => {
-    if (!queryTypes || !Array.isArray(queryTypes)) return 0;
-    return queryTypes.reduce((sum, item) => sum + item.count, 0);
-  };
-
-  const getUnknownQueries = () => {
-    if (!queryTypes || !Array.isArray(queryTypes)) return 0;
-    return queryTypes.find((t) => t.type === "UNKNOWN")?.count || 0;
-  };
+  const totalQueries = queryTypes.reduce((sum, item) => sum + item.count, 0);
+  const unknownQueries =
+    queryTypes.find((type) => type.type === "UNKNOWN")?.count || 0;
+  const resolutionRate = totalQueries
+    ? ((totalQueries - unknownQueries) / totalQueries) * 100
+    : 0;
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-gray-50 to-slate-100 dark:from-slate-950 dark:via-gray-950 dark:to-slate-900 p-6">
-      <div className="max-w-7xl mx-auto space-y-6">
+    <main className="min-h-screen bg-background px-4 py-5 sm:px-6 sm:py-8">
+      <div className="mx-auto max-w-7xl space-y-5 sm:space-y-6">
         {/* Header */}
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-3xl font-bold text-foreground">
-              DNS Analytics Dashboard
+        <header className="flex flex-col gap-4 border-b pb-5 lg:flex-row lg:items-end lg:justify-between">
+          <div className="min-w-0">
+            <div className="mb-2 flex items-center gap-2 text-sm font-medium text-primary">
+              <Network className="h-4 w-4" />
+              MikroTik DNS
+            </div>
+            <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">
+              DNS Analytics
             </h1>
-            <p className="text-muted-foreground">
-              MikroTik DNS Query Analytics - Last 24 Hours
+            <p className="mt-1 text-sm text-muted-foreground">
+              Network query activity from the last 24 hours
             </p>
           </div>
-          <div className="flex flex-col items-end gap-2">
+          <div className="flex flex-col gap-2 lg:items-end">
             {lastUpdated && (
-              <span className="text-sm text-muted-foreground">
-                Last updated: {lastUpdated.toLocaleTimeString()}
+              <span className="text-xs text-muted-foreground">
+                Updated {lastUpdated.toLocaleTimeString()}
               </span>
             )}
-            <div className="flex items-center gap-3">
+            <div className="flex flex-wrap items-center gap-2">
               <DarkModeSwitch />
               <Button
                 variant="outline"
-                size="default"
+                size="icon"
                 onClick={() =>
                   window.open(
                     "https://github.com/publi0/mikrotik-dns",
                     "_blank",
                   )
                 }
-                className="h-10 flex items-center gap-2"
+                aria-label="Open GitHub repository"
               >
                 <Github className="h-4 w-4" />
-                GitHub
               </Button>
 
-              <div className="flex items-center border border-border rounded-lg bg-card h-10 px-3 gap-2">
+              <div className="flex h-10 items-center gap-2 rounded-md border bg-card px-2">
                 <Button
                   variant="ghost"
-                  size="sm"
+                  size="icon"
                   onClick={() => setAutoRefresh(!autoRefresh)}
-                  className={`h-6 w-6 p-0 rounded transition-colors ${
+                  aria-label={autoRefresh ? "Pause auto refresh" : "Start auto refresh"}
+                  className={`h-7 w-7 ${
                     autoRefresh
-                      ? "bg-green-100 dark:bg-green-900/50 text-green-700 dark:text-green-400 hover:bg-green-200 dark:hover:bg-green-800/50"
-                      : "bg-muted text-muted-foreground hover:bg-accent"
+                      ? "text-emerald-600 hover:text-emerald-700 dark:text-emerald-400"
+                      : "text-muted-foreground"
                   }`}
                 >
                   {autoRefresh ? (
@@ -384,15 +388,16 @@ export default function DNSDashboard() {
                   )}
                 </Button>
 
-                <div className="flex items-center gap-1">
-                  <Clock className="h-3 w-3 text-muted-foreground" />
+                <div className="flex items-center">
+                  <Clock className="h-4 w-4 text-muted-foreground" />
                   <Select
                     value={refreshInterval.toString()}
                     onValueChange={(value) => setRefreshInterval(Number(value))}
                     disabled={!autoRefresh}
                   >
                     <SelectTrigger
-                      className={`w-16 h-6 border-none bg-transparent text-xs font-medium ${
+                      aria-label="Auto refresh interval"
+                      className={`h-8 w-16 border-0 bg-transparent px-2 text-xs shadow-none focus:ring-0 ${
                         autoRefresh
                           ? "text-foreground"
                           : "text-muted-foreground"
@@ -409,17 +414,12 @@ export default function DNSDashboard() {
                     </SelectContent>
                   </Select>
                 </div>
-
-                {autoRefresh && (
-                  <div className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse ml-1"></div>
-                )}
               </div>
 
               <Button
                 onClick={fetchData}
                 disabled={loading}
-                size="default"
-                className="h-10 flex items-center gap-2"
+                className="flex-1 sm:flex-none"
               >
                 <RefreshCw
                   className={`h-4 w-4 ${loading ? "animate-spin" : ""}`}
@@ -428,112 +428,109 @@ export default function DNSDashboard() {
               </Button>
             </div>
           </div>
-        </div>
+        </header>
 
-        {/* Stats Cards - Modern Design */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+        {/* Stats Cards */}
+        <section className="grid grid-cols-2 gap-3 lg:grid-cols-4">
           {/* Total Queries */}
-          <Card className="bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50 dark:from-slate-900/50 dark:via-blue-900/20 dark:to-indigo-900/30 border-slate-200/50 dark:border-slate-700/50 shadow-sm dark:shadow-lg dark:shadow-slate-900/20">
-            <CardContent className="p-6">
-              <div className="flex items-center gap-4">
-                <div className="flex items-center justify-center w-12 h-12 bg-gradient-to-br from-blue-500 to-indigo-600 dark:from-blue-400 dark:to-indigo-500 rounded-xl shadow-md">
-                  <Activity className="h-6 w-6 text-white" />
-                </div>
-                <div>
-                  <div className="text-sm text-slate-600 dark:text-slate-300 font-medium">
-                    Total Queries
+          <Card>
+            <CardContent className="p-4 sm:p-5">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="text-xs font-medium text-muted-foreground sm:text-sm">
+                    Total queries
                   </div>
-                  <div className="text-2xl font-bold text-slate-900 dark:text-white">
-                    <AnimatedNumber value={getTotalQueries()} />
+                  <div className="mt-2 text-2xl font-semibold tabular-nums sm:text-3xl">
+                    <AnimatedNumber value={totalQueries} />
                   </div>
-                  <div className="text-xs text-slate-500 dark:text-slate-400">
+                  <div className="mt-1 text-xs text-muted-foreground">
                     Last 24 hours
                   </div>
+                </div>
+                <div className="rounded-lg bg-blue-50 p-2 text-blue-600 dark:bg-blue-950 dark:text-blue-400">
+                  <Activity className="h-5 w-5" />
                 </div>
               </div>
             </CardContent>
           </Card>
 
           {/* Failed Queries */}
-          <Card className="bg-gradient-to-br from-red-50 via-rose-50 to-pink-50 dark:from-red-900/20 dark:via-rose-900/20 dark:to-pink-900/20 border-red-200/50 dark:border-red-800/50 shadow-sm dark:shadow-lg dark:shadow-red-900/10">
-            <CardContent className="p-6">
-              <div className="flex items-center gap-4">
-                <div className="flex items-center justify-center w-12 h-12 bg-gradient-to-br from-red-500 to-rose-600 dark:from-red-400 dark:to-rose-500 rounded-xl shadow-md">
-                  <AlertTriangle className="h-6 w-6 text-white" />
-                </div>
-                <div>
-                  <div className="text-sm text-slate-600 dark:text-slate-300 font-medium">
-                    Failed Queries
+          <Card>
+            <CardContent className="p-4 sm:p-5">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="text-xs font-medium text-muted-foreground sm:text-sm">
+                    Failed queries
                   </div>
-                  <div className="text-2xl font-bold text-slate-900 dark:text-white">
-                    <AnimatedNumber value={getUnknownQueries()} />
+                  <div className="mt-2 text-2xl font-semibold tabular-nums sm:text-3xl">
+                    <AnimatedNumber value={unknownQueries} />
                   </div>
-                  <div className="text-xs text-slate-500 dark:text-slate-400">
-                    {getTotalQueries() > 0
-                      ? (
-                          (getUnknownQueries() / getTotalQueries()) *
-                          100
-                        ).toFixed(1)
+                  <div className="mt-1 text-xs text-muted-foreground">
+                    {totalQueries > 0
+                      ? ((unknownQueries / totalQueries) * 100).toFixed(1)
                       : "0"}
                     % of total
                   </div>
+                </div>
+                <div className="rounded-lg bg-red-50 p-2 text-red-600 dark:bg-red-950 dark:text-red-400">
+                  <AlertTriangle className="h-5 w-5" />
                 </div>
               </div>
             </CardContent>
           </Card>
 
           {/* Active Clients */}
-          <Card className="bg-gradient-to-br from-emerald-50 via-green-50 to-teal-50 dark:from-emerald-900/20 dark:via-green-900/20 dark:to-teal-900/20 border-emerald-200/50 dark:border-emerald-800/50 shadow-sm dark:shadow-lg dark:shadow-emerald-900/10">
-            <CardContent className="p-6">
-              <div className="flex items-center gap-4">
-                <div className="flex items-center justify-center w-12 h-12 bg-gradient-to-br from-emerald-500 to-green-600 dark:from-emerald-400 dark:to-green-500 rounded-xl shadow-md">
-                  <Users className="h-6 w-6 text-white" />
-                </div>
-                <div>
-                  <div className="text-sm text-slate-600 dark:text-slate-300 font-medium">
-                    Active Clients
+          <Card>
+            <CardContent className="p-4 sm:p-5">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="text-xs font-medium text-muted-foreground sm:text-sm">
+                    Active clients
                   </div>
-                  <div className="text-2xl font-bold text-slate-900 dark:text-white">
+                  <div className="mt-2 text-2xl font-semibold tabular-nums sm:text-3xl">
                     <AnimatedNumber value={uniqueClientsCount} />
                   </div>
-                  <div className="text-xs text-slate-500 dark:text-slate-400">
+                  <div className="mt-1 text-xs text-muted-foreground">
                     Unique IP addresses
                   </div>
+                </div>
+                <div className="rounded-lg bg-emerald-50 p-2 text-emerald-600 dark:bg-emerald-950 dark:text-emerald-400">
+                  <Users className="h-5 w-5" />
                 </div>
               </div>
             </CardContent>
           </Card>
 
           {/* Unique Domains */}
-          <Card className="bg-gradient-to-br from-violet-50 via-purple-50 to-fuchsia-50 dark:from-violet-900/20 dark:via-purple-900/20 dark:to-fuchsia-900/20 border-violet-200/50 dark:border-violet-800/50 shadow-sm dark:shadow-lg dark:shadow-violet-900/10">
-            <CardContent className="p-6">
-              <div className="flex items-center gap-4">
-                <div className="flex items-center justify-center w-12 h-12 bg-gradient-to-br from-violet-500 to-purple-600 dark:from-violet-400 dark:to-purple-500 rounded-xl shadow-md">
-                  <Globe className="h-6 w-6 text-white" />
-                </div>
-                <div>
-                  <div className="text-sm text-slate-600 dark:text-slate-300 font-medium">
-                    Unique Domains
+          <Card>
+            <CardContent className="p-4 sm:p-5">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="text-xs font-medium text-muted-foreground sm:text-sm">
+                    Unique domains
                   </div>
-                  <div className="text-2xl font-bold text-slate-900 dark:text-white">
+                  <div className="mt-2 text-2xl font-semibold tabular-nums sm:text-3xl">
                     <AnimatedNumber value={uniqueDomainsCount} />
                   </div>
-                  <div className="text-xs text-slate-500 dark:text-slate-400">
-                    Different domains queried
+                  <div className="mt-1 text-xs text-muted-foreground">
+                    Different domains
                   </div>
+                </div>
+                <div className="rounded-lg bg-violet-50 p-2 text-violet-600 dark:bg-violet-950 dark:text-violet-400">
+                  <Globe className="h-5 w-5" />
                 </div>
               </div>
             </CardContent>
           </Card>
-        </div>
+        </section>
 
         {/* Main Content */}
         <Tabs
           value={activeTab}
           onValueChange={setActiveTab}
-          className="space-y-6"
+          className="space-y-5"
         >
-          <TabsList className="grid w-full grid-cols-5">
+          <TabsList className="grid h-auto w-full grid-cols-3 gap-1 bg-muted p-1 sm:inline-flex sm:w-auto">
             <TabsTrigger value="overview">Overview</TabsTrigger>
             <TabsTrigger value="domains">Domains</TabsTrigger>
             <TabsTrigger value="clients">Clients</TabsTrigger>
@@ -543,7 +540,7 @@ export default function DNSDashboard() {
 
           <TabsContent value="overview" className="space-y-6">
             {/* Overview Grid */}
-            <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
+            <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
               {/* Query Types - Modern Design */}
               <Card className="col-span-1">
                 <CardHeader>
@@ -555,27 +552,26 @@ export default function DNSDashboard() {
                 </CardHeader>
                 <CardContent>
                   <div className="space-y-4">
-                    {queryTypes &&
-                      queryTypes.slice(0, 6).map((item, index) => {
+                    {queryTypes.length === 0 && (
+                      <p className="py-6 text-center text-sm text-muted-foreground">
+                        No query data yet
+                      </p>
+                    )}
+                    {queryTypes.slice(0, 6).map((item) => {
                         const percentage =
-                          (item.count / getTotalQueries()) * 100;
+                          totalQueries > 0
+                            ? (item.count / totalQueries) * 100
+                            : 0;
                         const isUnknown = item.type === "UNKNOWN";
                         return (
                           <div key={item.type} className="space-y-2">
                             <div className="flex items-center justify-between">
                               <div className="flex items-center gap-2">
                                 <div
-                                  className={`w-3 h-3 rounded-full ${isUnknown ? "bg-red-500 dark:bg-red-400" : ""}`}
-                                  style={
-                                    !isUnknown
-                                      ? {
-                                          backgroundColor: `hsl(${index * 60}, 70%, 55%)`,
-                                        }
-                                      : {}
-                                  }
+                                  className={`h-2 w-2 rounded-full ${isUnknown ? "bg-red-500" : "bg-primary"}`}
                                 />
                                 <span
-                                  className={`text-sm font-medium ${isUnknown ? "text-red-600 dark:text-red-400" : "text-foreground"}`}
+                                  className={`text-sm font-medium ${isUnknown ? "text-red-600 dark:text-red-400" : ""}`}
                                 >
                                   {item.type}
                                 </span>
@@ -592,20 +588,13 @@ export default function DNSDashboard() {
                                 </div>
                               </div>
                             </div>
-                            <div className="w-full bg-muted rounded-full h-2">
-                              <div
-                                className={`h-2 rounded-full transition-all duration-500 ${isUnknown ? "bg-red-500 dark:bg-red-400" : ""}`}
-                                style={{
-                                  width: `${percentage}%`,
-                                  backgroundColor: !isUnknown
-                                    ? `hsl(${index * 60}, 70%, 55%)`
-                                    : undefined,
-                                }}
-                              />
-                            </div>
+                            <Progress
+                              value={percentage}
+                              className={`h-1.5 ${isUnknown ? "[&>div]:bg-red-500" : ""}`}
+                            />
                           </div>
                         );
-                      })}
+                    })}
                   </div>
                 </CardContent>
               </Card>
@@ -621,39 +610,40 @@ export default function DNSDashboard() {
                 </CardHeader>
                 <CardContent>
                   <div className="space-y-3">
-                    {topDomains &&
-                      topDomains.slice(0, 8).map((item, index) => {
+                    {topDomains.length === 0 && (
+                      <p className="py-6 text-center text-sm text-muted-foreground">
+                        No domain activity yet
+                      </p>
+                    )}
+                    {topDomains.slice(0, 8).map((item, index) => {
                         const maxCount = topDomains[0]?.count || 1;
                         const percentage = (item.count / maxCount) * 100;
                         const isTopThree = index < 3;
 
                         return (
-                          <div
+                          <button
+                            type="button"
                             key={item.domain}
-                            className={`p-4 rounded-xl border transition-all duration-300 hover:shadow-md dark:hover:shadow-lg dark:hover:shadow-slate-900/20 cursor-pointer hover:scale-[1.02] active:scale-[0.98] hover:-translate-y-0.5 ${
-                              isTopThree
-                                ? "bg-gradient-to-r from-slate-50 via-blue-50 to-transparent dark:from-slate-800/50 dark:via-blue-900/30 dark:to-transparent border-blue-200/60 dark:border-blue-700/50 shadow-sm hover:shadow-lg hover:shadow-blue-100/50 dark:hover:shadow-blue-900/20"
-                                : "border-border hover:border-border/60 dark:hover:border-slate-600/50 bg-card hover:bg-accent/30"
-                            }`}
+                            className="w-full rounded-lg border p-3 text-left hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                             onClick={() => {
                               setSelectedDomain(item.domain);
                               setActiveTab("domains");
                             }}
                           >
-                            <div className="flex items-center justify-between mb-3">
+                            <div className="mb-3 flex items-center justify-between">
                               <div className="flex items-center gap-3 min-w-0 flex-1">
                                 <span
-                                  className={`text-xs font-bold w-8 h-8 rounded-lg flex items-center justify-center shadow-sm flex-shrink-0 ${
+                                  className={`flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-md text-xs font-semibold ${
                                     isTopThree
-                                      ? "bg-gradient-to-br from-blue-500 to-indigo-600 dark:from-blue-400 dark:to-indigo-500 text-white"
-                                      : "bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300"
+                                      ? "bg-primary text-primary-foreground"
+                                      : "bg-muted text-muted-foreground"
                                   }`}
                                 >
                                   {index + 1}
                                 </span>
                                 <div className="min-w-0 flex-1">
                                   <span
-                                    className="font-semibold text-sm text-slate-900 dark:text-slate-100 truncate block"
+                                    className="block truncate text-sm font-medium"
                                     title={item.domain}
                                   >
                                     {item.domain}
@@ -662,28 +652,19 @@ export default function DNSDashboard() {
                               </div>
                               <Badge
                                 variant={isTopThree ? "default" : "secondary"}
-                                className={`text-xs font-medium ml-2 flex-shrink-0 ${
+                                className={`ml-2 flex-shrink-0 text-xs font-medium ${
                                   isTopThree
-                                    ? "bg-blue-100 text-blue-700 dark:bg-blue-900/50 dark:text-blue-300"
+                                    ? "bg-blue-50 text-blue-700 dark:bg-blue-950 dark:text-blue-300"
                                     : ""
                                 }`}
                               >
                                 {item.count.toLocaleString()}
                               </Badge>
                             </div>
-                            <div className="w-full bg-slate-200 dark:bg-slate-700 rounded-full h-2 overflow-hidden">
-                              <div
-                                className={`h-2 rounded-full transition-all duration-700 ${
-                                  isTopThree
-                                    ? "bg-gradient-to-r from-blue-500 to-indigo-600 dark:from-blue-400 dark:to-indigo-500"
-                                    : "bg-slate-400 dark:bg-slate-500"
-                                }`}
-                                style={{ width: `${percentage}%` }}
-                              />
-                            </div>
-                          </div>
+                            <Progress value={percentage} className="h-1.5" />
+                          </button>
                         );
-                      })}
+                    })}
                   </div>
                 </CardContent>
               </Card>
@@ -700,114 +681,109 @@ export default function DNSDashboard() {
                 <CardContent>
                   <div className="space-y-4">
                     {/* Query Rate */}
-                    <div className="flex items-center justify-between p-4 bg-gradient-to-r from-violet-50 via-purple-50 to-transparent dark:from-violet-900/20 dark:via-purple-900/30 dark:to-transparent rounded-xl border border-violet-200/60 dark:border-violet-700/50 shadow-sm">
+                    <div className="flex items-center justify-between rounded-lg border p-3">
                       <div className="flex items-center gap-3">
-                        <div className="p-2 bg-gradient-to-br from-violet-100 to-purple-100 dark:from-violet-800/50 dark:to-purple-800/50 rounded-lg shadow-sm">
-                          <Zap className="h-4 w-4 text-violet-600 dark:text-violet-400" />
+                        <div className="rounded-md bg-muted p-2 text-primary">
+                          <Zap className="h-4 w-4" />
                         </div>
                         <div>
-                          <div className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+                          <div className="text-sm font-medium">
                             Query Rate
                           </div>
-                          <div className="text-xs text-slate-500 dark:text-slate-400">
+                          <div className="text-xs text-muted-foreground">
                             Avg. per minute
                           </div>
                         </div>
                       </div>
                       <div className="text-right">
-                        <div className="font-bold text-violet-600 dark:text-violet-400 text-lg">
+                        <div className="text-lg font-semibold tabular-nums">
                           {queriesPerMinute.toFixed(1)}
                         </div>
-                        <div className="text-xs text-slate-500 dark:text-slate-400">
+                        <div className="text-xs text-muted-foreground">
                           /min
                         </div>
                       </div>
                     </div>
 
                     {/* Network Health */}
-                    <div className="flex items-center justify-between p-4 bg-gradient-to-r from-emerald-50 via-green-50 to-transparent dark:from-emerald-900/20 dark:via-green-900/30 dark:to-transparent rounded-xl border border-emerald-200/60 dark:border-emerald-700/50 shadow-sm">
+                    <div className="flex items-center justify-between rounded-lg border p-3">
                       <div className="flex items-center gap-3">
-                        <div className="p-2 bg-gradient-to-br from-emerald-100 to-green-100 dark:from-emerald-800/50 dark:to-green-800/50 rounded-lg shadow-sm">
-                          <Shield className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
+                        <div className="rounded-md bg-muted p-2 text-emerald-600 dark:text-emerald-400">
+                          <Shield className="h-4 w-4" />
                         </div>
                         <div>
-                          <div className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+                          <div className="text-sm font-medium">
                             Resolution Rate
                           </div>
-                          <div className="text-xs text-slate-500 dark:text-slate-400">
+                          <div className="text-xs text-muted-foreground">
                             Successful queries
                           </div>
                         </div>
                       </div>
                       <div className="text-right">
-                        <div className="font-bold text-emerald-600 dark:text-emerald-400 text-lg">
-                          {(
-                            ((getTotalQueries() - getUnknownQueries()) /
-                              getTotalQueries()) *
-                            100
-                          ).toFixed(1)}
-                          %
+                        <div className="text-lg font-semibold tabular-nums">
+                          {resolutionRate.toFixed(1)}%
                         </div>
-                        <div className="text-xs text-slate-500 dark:text-slate-400">
+                        <div className="text-xs text-muted-foreground">
                           success
                         </div>
                       </div>
                     </div>
 
                     {/* Client Distribution */}
-                    <div className="flex items-center justify-between p-4 bg-gradient-to-r from-blue-50 via-sky-50 to-transparent dark:from-blue-900/20 dark:via-sky-900/30 dark:to-transparent rounded-xl border border-blue-200/60 dark:border-blue-700/50 shadow-sm">
+                    <div className="flex items-center justify-between rounded-lg border p-3">
                       <div className="flex items-center gap-3">
-                        <div className="p-2 bg-gradient-to-br from-blue-100 to-sky-100 dark:from-blue-800/50 dark:to-sky-800/50 rounded-lg shadow-sm">
-                          <Network className="h-4 w-4 text-blue-600 dark:text-blue-400" />
+                        <div className="rounded-md bg-muted p-2 text-primary">
+                          <Network className="h-4 w-4" />
                         </div>
                         <div>
-                          <div className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+                          <div className="text-sm font-medium">
                             Avg. per Client
                           </div>
-                          <div className="text-xs text-slate-500 dark:text-slate-400">
+                          <div className="text-xs text-muted-foreground">
                             Queries per device
                           </div>
                         </div>
                       </div>
                       <div className="text-right">
-                        <div className="font-bold text-blue-600 dark:text-blue-400 text-lg">
+                        <div className="text-lg font-semibold tabular-nums">
                           {uniqueClientsCount > 0
                             ? Math.round(
-                                getTotalQueries() / uniqueClientsCount,
+                                totalQueries / uniqueClientsCount,
                               ).toLocaleString()
                             : "0"}
                         </div>
-                        <div className="text-xs text-slate-500 dark:text-slate-400">
+                        <div className="text-xs text-muted-foreground">
                           per device
                         </div>
                       </div>
                     </div>
 
                     {/* IPv4 vs IPv6 Distribution */}
-                    <div className="p-4 bg-gradient-to-r from-amber-50 via-orange-50 to-transparent dark:from-amber-900/20 dark:via-orange-900/30 dark:to-transparent rounded-xl border border-amber-200/60 dark:border-amber-700/50 shadow-sm">
+                    <div className="rounded-lg border p-3">
                       <div className="flex items-center justify-between mb-4">
                         <div className="flex items-center gap-3">
-                          <div className="p-2 bg-gradient-to-br from-amber-100 to-orange-100 dark:from-amber-800/50 dark:to-orange-800/50 rounded-lg shadow-sm">
-                            <TrendingUp className="h-4 w-4 text-amber-600 dark:text-amber-400" />
+                          <div className="rounded-md bg-muted p-2 text-primary">
+                            <TrendingUp className="h-4 w-4" />
                           </div>
                           <div>
-                            <div className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+                            <div className="text-sm font-medium">
                               IP Version Usage
                             </div>
-                            <div className="text-xs text-slate-500 dark:text-slate-400">
+                            <div className="text-xs text-muted-foreground">
                               IPv4 vs IPv6 adoption
                             </div>
                           </div>
                         </div>
                         <div className="text-right">
-                          <div className="font-bold text-amber-600 dark:text-amber-400 text-lg">
+                          <div className="text-lg font-semibold tabular-nums">
                             {(
                               (ipv6Count / (ipv4Count + ipv6Count || 1)) *
                               100
                             ).toFixed(1)}
                             %
                           </div>
-                          <div className="text-xs text-slate-500 dark:text-slate-400">
+                          <div className="text-xs text-muted-foreground">
                             IPv6 adoption
                           </div>
                         </div>
@@ -818,11 +794,11 @@ export default function DNSDashboard() {
                         {/* IPv4 Bar */}
                         <div>
                           <div className="flex items-center justify-between text-sm mb-2">
-                            <span className="flex items-center gap-2 text-slate-600 dark:text-slate-300 font-medium">
-                              <div className="w-3 h-3 bg-gradient-to-r from-blue-500 to-sky-600 dark:from-blue-400 dark:to-sky-500 rounded-full shadow-sm"></div>
+                            <span className="flex items-center gap-2 font-medium text-muted-foreground">
+                              <div className="h-2 w-2 rounded-full bg-primary" />
                               IPv4
                             </span>
-                            <span className="font-semibold text-slate-900 dark:text-slate-100">
+                            <span className="font-medium tabular-nums">
                               {ipv4Count.toLocaleString()} (
                               {(
                                 (ipv4Count / (ipv4Count + ipv6Count || 1)) *
@@ -831,24 +807,20 @@ export default function DNSDashboard() {
                               %)
                             </span>
                           </div>
-                          <div className="w-full bg-slate-200 dark:bg-slate-700 rounded-full h-2 overflow-hidden">
-                            <div
-                              className="bg-gradient-to-r from-blue-500 to-sky-600 dark:from-blue-400 dark:to-sky-500 h-2 rounded-full transition-all duration-700"
-                              style={{
-                                width: `${(ipv4Count / (ipv4Count + ipv6Count || 1)) * 100}%`,
-                              }}
-                            />
-                          </div>
+                          <Progress
+                            value={(ipv4Count / (ipv4Count + ipv6Count || 1)) * 100}
+                            className="h-1.5"
+                          />
                         </div>
 
                         {/* IPv6 Bar */}
                         <div>
                           <div className="flex items-center justify-between text-sm mb-2">
-                            <span className="flex items-center gap-2 text-slate-600 dark:text-slate-300 font-medium">
-                              <div className="w-3 h-3 bg-gradient-to-r from-emerald-500 to-green-600 dark:from-emerald-400 dark:to-green-500 rounded-full shadow-sm"></div>
+                            <span className="flex items-center gap-2 font-medium text-muted-foreground">
+                              <div className="h-2 w-2 rounded-full bg-emerald-500" />
                               IPv6
                             </span>
-                            <span className="font-semibold text-slate-900 dark:text-slate-100">
+                            <span className="font-medium tabular-nums">
                               {ipv6Count.toLocaleString()} (
                               {(
                                 (ipv6Count / (ipv4Count + ipv6Count || 1)) *
@@ -857,14 +829,10 @@ export default function DNSDashboard() {
                               %)
                             </span>
                           </div>
-                          <div className="w-full bg-slate-200 dark:bg-slate-700 rounded-full h-2 overflow-hidden">
-                            <div
-                              className="bg-gradient-to-r from-emerald-500 to-green-600 dark:from-emerald-400 dark:to-green-500 h-2 rounded-full transition-all duration-700"
-                              style={{
-                                width: `${(ipv6Count / (ipv4Count + ipv6Count || 1)) * 100}%`,
-                              }}
-                            />
-                          </div>
+                          <Progress
+                            value={(ipv6Count / (ipv4Count + ipv6Count || 1)) * 100}
+                            className="h-1.5 [&>div]:bg-emerald-500"
+                          />
                         </div>
                       </div>
                     </div>
@@ -875,7 +843,7 @@ export default function DNSDashboard() {
           </TabsContent>
 
           <TabsContent value="domains" className="space-y-6">
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
               <Card>
                 <CardHeader>
                   <CardTitle>Top 20 Domains</CardTitle>
@@ -886,12 +854,13 @@ export default function DNSDashboard() {
                 <CardContent>
                   <div className="space-y-2">
                     {topDomains.map((item, index) => (
-                      <div
+                      <button
+                        type="button"
                         key={item.domain}
-                        className={`flex items-center justify-between p-4 border rounded-xl cursor-pointer transition-all duration-300 hover:shadow-md dark:hover:shadow-lg dark:hover:shadow-slate-900/20 ${
+                        className={`flex w-full items-center justify-between gap-3 rounded-lg border p-3 text-left ${
                           selectedDomain === item.domain
-                            ? "bg-blue-50 dark:bg-blue-900/30 border-blue-200 dark:border-blue-700/50 shadow-sm"
-                            : "border-border hover:border-border/60 dark:hover:border-slate-600/50 bg-card hover:bg-accent/30"
+                            ? "border-primary/40 bg-blue-50 dark:bg-blue-950/50"
+                            : "hover:bg-muted/60"
                         }`}
                         onClick={() => setSelectedDomain(item.domain)}
                       >
@@ -917,7 +886,7 @@ export default function DNSDashboard() {
                             {item.count} queries
                           </Badge>
                         </div>
-                      </div>
+                      </button>
                     ))}
                   </div>
                 </CardContent>
@@ -935,7 +904,7 @@ export default function DNSDashboard() {
                 <CardContent>
                   {selectedDomain ? (
                     <div className="space-y-4">
-                      <div className="flex items-center gap-2">
+                      <div className="flex flex-col gap-2 sm:flex-row">
                         <Input
                           value={selectedDomain}
                           onChange={(e) => setSelectedDomain(e.target.value)}
@@ -950,8 +919,8 @@ export default function DNSDashboard() {
                         </Button>
                       </div>
 
-                      <div className="overflow-x-auto">
-                        <table className="w-full">
+                      <div className="-mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0">
+                        <table className="w-full whitespace-nowrap">
                           <thead>
                             <tr className="border-b border-border bg-muted/50">
                               <th className="text-left p-3 font-medium text-sm text-muted-foreground w-40">
@@ -1045,7 +1014,7 @@ export default function DNSDashboard() {
           </TabsContent>
 
           <TabsContent value="clients" className="space-y-6">
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
               <Card>
                 <CardHeader>
                   <CardTitle>Top Clients</CardTitle>
@@ -1054,9 +1023,10 @@ export default function DNSDashboard() {
                 <CardContent>
                   <div className="space-y-2">
                     {clients.map((item, index) => (
-                      <div
+                      <button
+                        type="button"
                         key={item.client}
-                        className="flex items-center justify-between p-3 border rounded-lg cursor-pointer hover:bg-blue-50 transition-colors"
+                        className={`flex items-center justify-between gap-3 rounded-lg border p-3 text-left hover:bg-muted/60 ${selectedClient === item.client ? "border-primary/40 bg-blue-50 dark:bg-blue-950/50" : ""}`}
                         onClick={() => setSelectedClient(item.client)}
                         onContextMenu={(e) => {
                           e.preventDefault();
@@ -1081,7 +1051,7 @@ export default function DNSDashboard() {
                         >
                           {item.count} queries
                         </Badge>
-                      </div>
+                      </button>
                     ))}
                   </div>
                 </CardContent>
@@ -1099,7 +1069,7 @@ export default function DNSDashboard() {
                 <CardContent>
                   {selectedClient ? (
                     <div className="space-y-4">
-                      <div className="flex items-center gap-2">
+                      <div className="flex flex-col gap-2 sm:flex-row">
                         <Input
                           value={selectedClient}
                           onChange={(e) => setSelectedClient(e.target.value)}
@@ -1114,8 +1084,8 @@ export default function DNSDashboard() {
                         </Button>
                       </div>
 
-                      <div className="overflow-x-auto">
-                        <table className="w-full">
+                      <div className="-mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0">
+                        <table className="w-full whitespace-nowrap">
                           <thead>
                             <tr className="border-b border-border bg-muted/50">
                               <th className="text-left p-3 font-medium text-sm text-muted-foreground w-48">
@@ -1215,8 +1185,8 @@ export default function DNSDashboard() {
                 </CardDescription>
               </CardHeader>
               <CardContent>
-                <div className="overflow-x-auto">
-                  <table className="w-full">
+                <div className="-mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0">
+                  <table className="w-full whitespace-nowrap">
                     <thead>
                       <tr className="border-b border-border bg-muted/50">
                         <th className="text-left p-3 font-medium text-sm text-muted-foreground w-48">
@@ -1329,7 +1299,7 @@ export default function DNSDashboard() {
               </CardHeader>
               <CardContent>
                 <div className="space-y-4">
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-col gap-2 sm:flex-row">
                     <div className="flex-1">
                       <Input
                         value={searchTerm}
@@ -1370,49 +1340,22 @@ export default function DNSDashboard() {
                     </div>
                   )}
 
-                  {searchResults && searchResults.length > 0 && (
+                  {searchResults.length > 0 && (
                     <div className="space-y-3">
                       {searchResults.map((result, index) => {
                         const { domain, type, resolution } = result;
-                        const getStatusStyles = (status: string) => {
-                          switch (status) {
-                            case "success":
-                              return {
-                                bgColor: "bg-green-100",
-                                textColor: "text-green-700",
-                                icon: "✓",
-                              };
-                            case "blocked":
-                              return {
-                                bgColor: "bg-red-100",
-                                textColor: "text-red-700",
-                                icon: "✗",
-                              };
-                            case "error":
-                              return {
-                                bgColor: "bg-orange-100",
-                                textColor: "text-orange-700",
-                                icon: "⚠",
-                              };
-                            default:
-                              return {
-                                bgColor: "bg-gray-100",
-                                textColor: "text-gray-700",
-                                icon: "?",
-                              };
-                          }
-                        };
-
-                        const statusStyles = getStatusStyles(resolution.status);
+                        const [statusClassName, statusIcon] =
+                          resolutionStatusStyles[resolution.status] ??
+                          resolutionStatusStyles.default;
 
                         return (
                           <div
                             key={index}
-                            className="border border-border rounded-lg p-4 hover:bg-accent/50 transition-colors"
+                            className="rounded-lg border p-3 hover:bg-muted/50 sm:p-4"
                           >
                             <div className="flex items-start gap-4">
                               <div className="flex-1 min-w-0">
-                                <div className="flex items-center gap-3 mb-2">
+                                <div className="mb-2 flex flex-wrap items-center gap-2 sm:gap-3">
                                   <span
                                     className="font-mono font-semibold cursor-pointer hover:text-blue-600 dark:hover:text-blue-400 transition-colors truncate text-slate-900 dark:text-slate-100"
                                     title={`${domain} (click to copy)`}
@@ -1424,9 +1367,9 @@ export default function DNSDashboard() {
                                     {type}
                                   </Badge>
                                   <div
-                                    className={`flex items-center gap-2 px-2 py-1 rounded-full text-xs font-medium ${statusStyles.bgColor} ${statusStyles.textColor}`}
+                                    className={`flex items-center gap-2 rounded-full px-2 py-1 text-xs font-medium ${statusClassName}`}
                                   >
-                                    <span>{statusStyles.icon}</span>
+                                    <span>{statusIcon}</span>
                                     <span className="capitalize">
                                       {resolution.status}
                                     </span>
@@ -1499,7 +1442,7 @@ export default function DNSDashboard() {
                   )}
 
                   {searchTerm &&
-                    (!searchResults || searchResults.length === 0) &&
+                    searchResults.length === 0 &&
                     !isSearching && (
                       <div className="text-center text-slate-500 dark:text-slate-400 py-8">
                         No results found for "{searchTerm}"
@@ -1507,19 +1450,17 @@ export default function DNSDashboard() {
                     )}
 
                   {!searchTerm && (
-                    <div className="text-center text-slate-500 dark:text-slate-400 py-8 space-y-2">
-                      <div>
-                        🔍 Enter a domain name to search and perform live DNS
-                        resolution
-                      </div>
-                      <div className="text-xs text-slate-400 dark:text-slate-500">
+                    <div className="space-y-2 py-8 text-center text-muted-foreground">
+                      <Search className="mx-auto h-5 w-5" />
+                      <div>Enter a domain name to search and resolve it.</div>
+                      <div className="text-xs">
                         This will show if domains are blocked, their IP
                         addresses, and resolution status
                       </div>
                     </div>
                   )}
 
-                  {searchResults && searchResults.length > 0 && (
+                  {searchResults.length > 0 && (
                     <div className="flex justify-center gap-2 mt-4">
                       <Button
                         variant="outline"
@@ -1556,6 +1497,6 @@ export default function DNSDashboard() {
           </TabsContent>
         </Tabs>
       </div>
-    </div>
+    </main>
   );
 }
