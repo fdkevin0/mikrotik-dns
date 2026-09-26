@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import {
   Card,
   CardContent,
@@ -39,11 +39,17 @@ import {
 } from "lucide-react";
 import { AnimatedNumber } from "@/components/animated-number";
 import { DarkModeSwitch } from "@/components/dark-mode-switch";
+import { PaginationControls } from "@/components/pagination-controls";
+import { QueriesTab } from "@/components/queries-tab";
 import { useToast } from "@/hooks/use-toast";
 
 interface DomainData {
   domain: string;
   count: number;
+}
+
+interface DomainGroupData extends DomainData {
+  domain_count: number;
 }
 
 interface QueryTypeData {
@@ -68,40 +74,13 @@ interface DomainClient {
   last_query: number;
 }
 
-interface AllQuery {
-  timestamp: number;
-  client: string;
-  domain: string;
-  type: string;
-}
-
-interface DNSResolution {
-  status: string;
-  records: string[];
-  error?: string;
-  duration: number;
-}
-
-interface DomainWithResolution {
-  domain: string;
-  type: string;
-  resolution: DNSResolution;
-}
-
-const resolutionStatusStyles: Record<string, [string, string]> = {
-  success: ["bg-green-50 text-green-700 dark:bg-green-950 dark:text-green-300", "✓"],
-  blocked: ["bg-red-50 text-red-700 dark:bg-red-950 dark:text-red-300", "✗"],
-  error: ["bg-orange-50 text-orange-700 dark:bg-orange-950 dark:text-orange-300", "⚠"],
-  default: ["bg-muted text-muted-foreground", "?"],
-};
-
 export default function DNSDashboard() {
   const { toast } = useToast();
   const [topDomains, setTopDomains] = useState<DomainData[]>([]);
+  const [topDomainGroups, setTopDomainGroups] = useState<DomainGroupData[]>([]);
   const [queryTypes, setQueryTypes] = useState<QueryTypeData[]>([]);
   const [clients, setClients] = useState<ClientData[]>([]);
   const [clientQueries, setClientQueries] = useState<ClientQuery[]>([]);
-  const [allQueries, setAllQueries] = useState<AllQuery[]>([]);
   const [selectedClient, setSelectedClient] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
   const [loading, setLoading] = useState(false);
@@ -110,25 +89,27 @@ export default function DNSDashboard() {
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [uniqueClientsCount, setUniqueClientsCount] = useState(0);
   const [uniqueDomainsCount, setUniqueDomainsCount] = useState(0);
-  const [searchTerm, setSearchTerm] = useState("");
-  const [searchResults, setSearchResults] = useState<DomainWithResolution[]>(
-    [],
-  );
-  const [searchPage, setSearchPage] = useState(1);
-  const [isSearching, setIsSearching] = useState(false);
   const [queriesPerMinute, setQueriesPerMinute] = useState(0);
+  const [retentionHours, setRetentionHours] = useState(24);
   const [ipv4Count, setIpv4Count] = useState(0);
   const [ipv6Count, setIpv6Count] = useState(0);
   const [selectedDomain, setSelectedDomain] = useState("");
   const [domainClients, setDomainClients] = useState<DomainClient[]>([]);
   const [domainPage, setDomainPage] = useState(1);
+  const [domainSuffixMatch, setDomainSuffixMatch] = useState(false);
+  const [domainView, setDomainView] = useState<"exact" | "grouped">("exact");
+  const [selectedDomainGroup, setSelectedDomainGroup] = useState("");
+  const [domainGroupMembers, setDomainGroupMembers] = useState<DomainData[]>([]);
+  const [domainGroupPage, setDomainGroupPage] = useState(1);
   const [activeTab, setActiveTab] = useState("overview");
+  const latestDomainGroupRequest = useRef(0);
 
   const fetchData = async () => {
     setLoading(true);
     try {
       const [
         domainsRes,
+        domainGroupsRes,
         typesRes,
         clientsRes,
         uniqueClientsRes,
@@ -137,6 +118,7 @@ export default function DNSDashboard() {
         ipvRes,
       ] = await Promise.all([
         fetch("/api/top-domains"),
+        fetch("/api/top-domain-groups"),
         fetch("/api/query-types"),
         fetch("/api/clients"),
         fetch("/api/unique-clients-count"),
@@ -146,10 +128,14 @@ export default function DNSDashboard() {
       ]);
 
       const domainsData = await domainsRes.json();
+      const domainGroupsData = await domainGroupsRes.json();
       const typesData = await typesRes.json();
       const clientsData = await clientsRes.json();
 
       setTopDomains(Array.isArray(domainsData) ? domainsData : []);
+      setTopDomainGroups(
+        Array.isArray(domainGroupsData) ? domainGroupsData : [],
+      );
       setQueryTypes(Array.isArray(typesData) ? typesData : []);
       setClients(Array.isArray(clientsData) ? clientsData : []);
 
@@ -161,6 +147,7 @@ export default function DNSDashboard() {
 
       const qpmData = await qpsRes.json();
       setQueriesPerMinute(qpmData?.queries_per_minute || 0);
+      setRetentionHours((qpmData?.time_window_minutes || 1440) / 60);
 
       const ipvData = await ipvRes.json();
       const ipv4 =
@@ -190,21 +177,8 @@ export default function DNSDashboard() {
     }
   };
 
-  const fetchAllQueries = async (page = 1) => {
-    try {
-      const res = await fetch(
-        `/api/all-queries?page=${page}&page_size=50`,
-      );
-      const data = await res.json();
-      setAllQueries(Array.isArray(data) ? data : []);
-    } catch (error) {
-      console.error("Failed to fetch all queries:", error);
-    }
-  };
-
   useEffect(() => {
     fetchData();
-    fetchAllQueries(1);
   }, []);
 
   useEffect(() => {
@@ -215,26 +189,40 @@ export default function DNSDashboard() {
 
   useEffect(() => {
     if (selectedDomain) {
-      fetchDomainClients(selectedDomain, domainPage);
+      fetchDomainClients(selectedDomain, domainPage, domainSuffixMatch);
     }
-  }, [selectedDomain, domainPage]);
+  }, [selectedDomain, domainPage, domainSuffixMatch]);
+
+  useEffect(() => {
+    if (domainView === "grouped" && selectedDomainGroup) {
+      fetchDomainGroupMembers(selectedDomainGroup, domainGroupPage);
+    } else {
+      latestDomainGroupRequest.current++;
+    }
+  }, [domainView, selectedDomainGroup, domainGroupPage]);
+
+  useEffect(() => {
+    if (
+      domainView === "grouped" &&
+      !selectedDomainGroup &&
+      topDomainGroups.length > 0
+    ) {
+      setSelectedDomainGroup(topDomainGroups[0].domain);
+      setDomainGroupPage(1);
+    }
+  }, [domainView, selectedDomainGroup, topDomainGroups]);
 
   useEffect(() => {
     let interval: NodeJS.Timeout | null = null;
 
     if (autoRefresh && refreshInterval > 0) {
-      interval = setInterval(() => {
-        fetchData();
-        if (!selectedClient) {
-          fetchAllQueries(currentPage);
-        }
-      }, refreshInterval * 1000);
+      interval = setInterval(fetchData, refreshInterval * 1000);
     }
 
     return () => {
       if (interval) clearInterval(interval);
     };
-  }, [autoRefresh, refreshInterval, selectedClient, currentPage]);
+  }, [autoRefresh, refreshInterval]);
 
   const formatTimestamp = (timestamp: number) => {
     return new Date(timestamp * 1000).toLocaleString();
@@ -285,36 +273,19 @@ export default function DNSDashboard() {
     }
   };
 
-  const searchDomains = async (term: string, page = 1) => {
-    if (!term.trim()) {
-      setSearchResults([]);
-      return;
-    }
-
-    setIsSearching(true);
+  const fetchDomainClients = async (
+    domain: string,
+    page = 1,
+    suffix = false,
+  ) => {
     try {
       const params = new URLSearchParams({
-        domain: term.trim(),
-        partial: "true",
+        domain,
+        suffix: suffix.toString(),
         page: page.toString(),
         page_size: "20",
       });
-      const res = await fetch(`/api/domain-queries?${params}`);
-      const data = await res.json();
-      setSearchResults(Array.isArray(data) ? data : []);
-    } catch (error) {
-      console.error("Failed to search domains:", error);
-      setSearchResults([]);
-    } finally {
-      setIsSearching(false);
-    }
-  };
-
-  const fetchDomainClients = async (domain: string, page = 1) => {
-    try {
-      const res = await fetch(
-        `/api/domain-clients?domain=${domain}&page=${page}&page_size=20`,
-      );
+      const res = await fetch(`/api/domain-clients?${params}`);
       const data = await res.json();
       setDomainClients(Array.isArray(data) ? data : []);
     } catch (error) {
@@ -323,12 +294,42 @@ export default function DNSDashboard() {
     }
   };
 
+  const fetchDomainGroupMembers = async (group: string, page = 1) => {
+    const request = ++latestDomainGroupRequest.current;
+    try {
+      const params = new URLSearchParams({
+        group,
+        page: page.toString(),
+        page_size: "20",
+      });
+      const res = await fetch(`/api/domain-group-members?${params}`);
+      const data = await res.json();
+      if (request === latestDomainGroupRequest.current) {
+        setDomainGroupMembers(Array.isArray(data) ? data : []);
+      }
+    } catch (error) {
+      console.error("Failed to fetch domain group members:", error);
+      if (request === latestDomainGroupRequest.current) {
+        setDomainGroupMembers([]);
+      }
+    }
+  };
+
+  const changeDomainView = (view: "exact" | "grouped") => {
+    latestDomainGroupRequest.current++;
+    setDomainView(view);
+  };
+
   const totalQueries = queryTypes.reduce((sum, item) => sum + item.count, 0);
   const unknownQueries =
     queryTypes.find((type) => type.type === "UNKNOWN")?.count || 0;
   const resolutionRate = totalQueries
     ? ((totalQueries - unknownQueries) / totalQueries) * 100
     : 0;
+  const retentionLabel =
+    retentionHours % 24 === 0
+      ? `${retentionHours / 24} ${retentionHours === 24 ? "day" : "days"}`
+      : `${retentionHours} ${retentionHours === 1 ? "hour" : "hours"}`;
 
   return (
     <main className="min-h-screen bg-background px-4 py-5 sm:px-6 sm:py-8">
@@ -344,7 +345,7 @@ export default function DNSDashboard() {
               DNS Analytics
             </h1>
             <p className="mt-1 text-sm text-muted-foreground">
-              Network query activity from the last 24 hours
+              Network query activity from the last {retentionLabel}
             </p>
           </div>
           <div className="flex flex-col gap-2 lg:items-end">
@@ -444,7 +445,7 @@ export default function DNSDashboard() {
                     <AnimatedNumber value={totalQueries} />
                   </div>
                   <div className="mt-1 text-xs text-muted-foreground">
-                    Last 24 hours
+                    Last {retentionLabel}
                   </div>
                 </div>
                 <div className="rounded-lg bg-blue-50 p-2 text-blue-600 dark:bg-blue-950 dark:text-blue-400">
@@ -530,12 +531,11 @@ export default function DNSDashboard() {
           onValueChange={setActiveTab}
           className="space-y-5"
         >
-          <TabsList className="grid h-auto w-full grid-cols-3 gap-1 bg-muted p-1 sm:inline-flex sm:w-auto">
+          <TabsList className="grid h-auto w-full grid-cols-2 gap-1 bg-muted p-1 sm:inline-flex sm:w-auto">
             <TabsTrigger value="overview">Overview</TabsTrigger>
             <TabsTrigger value="domains">Domains</TabsTrigger>
             <TabsTrigger value="clients">Clients</TabsTrigger>
-            <TabsTrigger value="search">Search</TabsTrigger>
-            <TabsTrigger value="queries">All Queries</TabsTrigger>
+            <TabsTrigger value="queries">Queries</TabsTrigger>
           </TabsList>
 
           <TabsContent value="overview" className="space-y-6">
@@ -627,6 +627,8 @@ export default function DNSDashboard() {
                             className="w-full rounded-lg border p-3 text-left hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                             onClick={() => {
                               setSelectedDomain(item.domain);
+                              setDomainSuffixMatch(false);
+                              setDomainPage(1);
                               setActiveTab("domains");
                             }}
                           >
@@ -845,171 +847,294 @@ export default function DNSDashboard() {
           <TabsContent value="domains" className="space-y-6">
             <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
               <Card>
-                <CardHeader>
-                  <CardTitle>Top 20 Domains</CardTitle>
-                  <CardDescription>
-                    Most frequently queried domains
-                  </CardDescription>
+                <CardHeader className="gap-4">
+                  <div>
+                    <CardTitle>
+                      {domainView === "exact"
+                        ? "Top 20 Domains"
+                        : "Top 20 Domain Groups"}
+                    </CardTitle>
+                    <CardDescription>
+                      {domainView === "exact"
+                        ? "Most frequently queried domains"
+                        : "Queries grouped by registrable domain using the Public Suffix List"}
+                    </CardDescription>
+                  </div>
+                  <div
+                    className="flex w-fit rounded-md border p-1"
+                    role="group"
+                    aria-label="Domain ranking mode"
+                  >
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant={domainView === "exact" ? "secondary" : "ghost"}
+                      aria-pressed={domainView === "exact"}
+                      onClick={() => changeDomainView("exact")}
+                    >
+                      Full domains
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant={domainView === "grouped" ? "secondary" : "ghost"}
+                      aria-pressed={domainView === "grouped"}
+                      onClick={() => changeDomainView("grouped")}
+                    >
+                      PSL groups
+                    </Button>
+                  </div>
                 </CardHeader>
                 <CardContent>
                   <div className="space-y-2">
-                    {topDomains.map((item, index) => (
-                      <button
-                        type="button"
-                        key={item.domain}
-                        className={`flex w-full items-center justify-between gap-3 rounded-lg border p-3 text-left ${
-                          selectedDomain === item.domain
-                            ? "border-primary/40 bg-blue-50 dark:bg-blue-950/50"
-                            : "hover:bg-muted/60"
-                        }`}
-                        onClick={() => setSelectedDomain(item.domain)}
-                      >
-                        <div className="flex items-center gap-3 min-w-0 flex-1">
-                          <span className="text-sm font-mono text-slate-500 dark:text-slate-400 w-8 flex-shrink-0">
-                            #{index + 1}
-                          </span>
-                          <span
-                            className="font-semibold truncate text-slate-900 dark:text-slate-100"
-                            title={item.domain}
+                    {(domainView === "exact" ? topDomains : topDomainGroups).map(
+                      (item, index) => {
+                        const selected =
+                          domainView === "exact"
+                            ? selectedDomain === item.domain
+                            : selectedDomainGroup === item.domain;
+                        const domainCount =
+                          "domain_count" in item
+                            ? (item as DomainGroupData).domain_count
+                            : undefined;
+                        return (
+                          <button
+                            type="button"
+                            key={item.domain}
+                            className={`flex w-full items-center justify-between gap-3 rounded-lg border p-3 text-left ${
+                              selected
+                                ? "border-primary/40 bg-blue-50 dark:bg-blue-950/50"
+                                : "hover:bg-muted/60"
+                            }`}
+                            onClick={() => {
+                              if (domainView === "exact") {
+                                setSelectedDomain(item.domain);
+                                setDomainSuffixMatch(false);
+                                setDomainPage(1);
+                              } else {
+                                if (
+                                  selectedDomainGroup !== item.domain ||
+                                  domainGroupPage !== 1
+                                ) {
+                                  latestDomainGroupRequest.current++;
+                                  setDomainGroupMembers([]);
+                                  setSelectedDomainGroup(item.domain);
+                                  setDomainGroupPage(1);
+                                }
+                              }
+                            }}
                           >
-                            {item.domain}
-                          </span>
-                        </div>
-                        <div className="text-right flex-shrink-0 ml-3">
-                          <Badge
-                            variant={
-                              selectedDomain === item.domain
-                                ? "default"
-                                : "outline"
-                            }
-                          >
-                            {item.count} queries
-                          </Badge>
-                        </div>
-                      </button>
-                    ))}
+                            <div className="flex min-w-0 flex-1 items-center gap-3">
+                              <span className="w-8 flex-shrink-0 font-mono text-sm text-slate-500 dark:text-slate-400">
+                                #{index + 1}
+                              </span>
+                              <div className="min-w-0">
+                                <span
+                                  className="block truncate font-semibold text-slate-900 dark:text-slate-100"
+                                  title={item.domain}
+                                >
+                                  {item.domain}
+                                </span>
+                                {domainCount !== undefined && (
+                                  <span className="text-xs text-muted-foreground">
+                                    {domainCount} full {domainCount === 1 ? "domain" : "domains"}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                            <Badge variant={selected ? "default" : "outline"}>
+                              {item.count} queries
+                            </Badge>
+                          </button>
+                        );
+                      },
+                    )}
                   </div>
                 </CardContent>
               </Card>
 
-              <Card>
-                <CardHeader>
-                  <CardTitle>Domain Client Details</CardTitle>
-                  <CardDescription>
-                    {selectedDomain
-                      ? `Clients querying ${selectedDomain}`
-                      : "Select a domain to view client details"}
-                  </CardDescription>
-                </CardHeader>
-                <CardContent>
-                  {selectedDomain ? (
-                    <div className="space-y-4">
-                      <div className="flex flex-col gap-2 sm:flex-row">
-                        <Input
-                          value={selectedDomain}
-                          onChange={(e) => setSelectedDomain(e.target.value)}
-                          placeholder="Enter domain name"
-                          className="font-mono"
-                        />
-                        <Button
-                          onClick={() => fetchDomainClients(selectedDomain, 1)}
-                          size="sm"
-                        >
-                          <Search className="h-4 w-4" />
-                        </Button>
-                      </div>
-
-                      <div className="-mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0">
-                        <table className="w-full whitespace-nowrap">
-                          <thead>
-                            <tr className="border-b border-border bg-muted/50">
-                              <th className="text-left p-3 font-medium text-sm text-muted-foreground w-40">
-                                Client IP
-                              </th>
-                              <th className="text-left p-3 font-medium text-sm text-muted-foreground w-32">
-                                Queries
-                              </th>
-                              <th className="text-left p-3 font-medium text-sm text-muted-foreground">
-                                Last Query
-                              </th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {domainClients.map((client, index) => (
-                              <tr
-                                key={index}
-                                className="border-b border-border hover:bg-accent/50 transition-colors"
+              {domainView === "grouped" ? (
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Domains in Group</CardTitle>
+                    <CardDescription>
+                      {selectedDomainGroup
+                        ? `Full domains grouped under ${selectedDomainGroup}`
+                        : "Select a domain group to view its members"}
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    {selectedDomainGroup ? (
+                      <div className="space-y-4">
+                        <div className="space-y-2">
+                          {domainGroupMembers.map((item) => (
+                            <button
+                              type="button"
+                              key={item.domain}
+                              className="flex w-full items-center justify-between gap-3 rounded-lg border p-3 text-left hover:bg-muted/60"
+                              onClick={() => {
+                                setSelectedDomain(item.domain);
+                                setDomainSuffixMatch(false);
+                                setDomainPage(1);
+                                changeDomainView("exact");
+                              }}
+                            >
+                              <span
+                                className="truncate font-mono text-sm font-medium"
+                                title={item.domain}
                               >
-                                <td className="p-3 font-mono text-primary text-sm">
-                                  <span
-                                    className="cursor-pointer hover:text-primary/80 transition-colors"
-                                    title={`${client.client} (click to navigate, right-click to copy)`}
-                                    onClick={() => {
-                                      setSelectedClient(client.client);
-                                      setActiveTab("clients");
-                                      fetchClientQueries(client.client, 1);
-                                    }}
-                                    onContextMenu={(e) => {
-                                      e.preventDefault();
-                                      copyToClipboard(client.client);
-                                    }}
-                                  >
-                                    {client.client}
-                                  </span>
-                                </td>
-                                <td className="p-3 text-sm">
-                                  <Badge
-                                    variant="secondary"
-                                    className="font-mono"
-                                  >
-                                    {client.query_count}
-                                  </Badge>
-                                </td>
-                                <td className="p-3 font-mono text-gray-500 text-xs">
-                                  {formatTimestamp(client.last_query)}
-                                </td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
+                                {item.domain}
+                              </span>
+                              <Badge variant="outline">{item.count} queries</Badge>
+                            </button>
+                          ))}
+                          {domainGroupMembers.length === 0 && (
+                            <p className="py-8 text-center text-sm text-muted-foreground">
+                              No domains found in this group
+                            </p>
+                          )}
+                        </div>
+                        <PaginationControls
+                          page={domainGroupPage}
+                          onPrevious={() =>
+                            setDomainGroupPage((page) => Math.max(1, page - 1))
+                          }
+                          onNext={() => setDomainGroupPage((page) => page + 1)}
+                          nextDisabled={domainGroupMembers.length < 20}
+                        />
                       </div>
+                    ) : (
+                      <p className="py-8 text-center text-sm text-muted-foreground">
+                        Select a domain group to view its members
+                      </p>
+                    )}
+                  </CardContent>
+                </Card>
+              ) : (
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Domain Client Details</CardTitle>
+                    <CardDescription>
+                      {selectedDomain
+                        ? domainSuffixMatch
+                          ? `Clients querying ${selectedDomain} or any subdomain`
+                          : `Clients querying ${selectedDomain}`
+                        : "Select a domain to view client details"}
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    {selectedDomain ? (
+                      <div className="space-y-4">
+                        <div className="flex flex-col gap-2 sm:flex-row">
+                          <Input
+                            value={selectedDomain}
+                            onChange={(e) => setSelectedDomain(e.target.value)}
+                            placeholder="Enter domain name"
+                            className="font-mono"
+                          />
+                          <Button
+                            type="button"
+                            variant={domainSuffixMatch ? "default" : "outline"}
+                            size="sm"
+                            aria-pressed={domainSuffixMatch}
+                            onClick={() => {
+                              setDomainPage(1);
+                              setDomainSuffixMatch((enabled) => !enabled);
+                            }}
+                            className="whitespace-nowrap"
+                          >
+                            {domainSuffixMatch
+                              ? "Subdomains included"
+                              : "Include subdomains"}
+                          </Button>
+                          <Button
+                            onClick={() => {
+                              setDomainPage(1);
+                              fetchDomainClients(
+                                selectedDomain,
+                                1,
+                                domainSuffixMatch,
+                              );
+                            }}
+                            size="sm"
+                            aria-label="Search domain clients"
+                          >
+                            <Search className="h-4 w-4" />
+                          </Button>
+                        </div>
 
-                      <div className="flex justify-center gap-2">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => {
-                            const newPage = Math.max(1, domainPage - 1);
-                            setDomainPage(newPage);
-                            fetchDomainClients(selectedDomain, newPage);
-                          }}
-                          disabled={domainPage === 1}
-                        >
-                          Previous
-                        </Button>
-                        <span className="px-3 py-1 text-sm">
-                          Page {domainPage}
-                        </span>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => {
-                            const newPage = domainPage + 1;
-                            setDomainPage(newPage);
-                            fetchDomainClients(selectedDomain, newPage);
-                          }}
-                        >
-                          Next
-                        </Button>
+                        <div className="-mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0">
+                          <table className="w-full whitespace-nowrap">
+                            <thead>
+                              <tr className="border-b border-border bg-muted/50">
+                                <th className="text-left p-3 font-medium text-sm text-muted-foreground w-40">
+                                  Client IP
+                                </th>
+                                <th className="text-left p-3 font-medium text-sm text-muted-foreground w-32">
+                                  Queries
+                                </th>
+                                <th className="text-left p-3 font-medium text-sm text-muted-foreground">
+                                  Last Query
+                                </th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {domainClients.map((client, index) => (
+                                <tr
+                                  key={index}
+                                  className="border-b border-border hover:bg-accent/50 transition-colors"
+                                >
+                                  <td className="p-3 font-mono text-primary text-sm">
+                                    <span
+                                      className="cursor-pointer hover:text-primary/80 transition-colors"
+                                      title={`${client.client} (click to navigate, right-click to copy)`}
+                                      onClick={() => {
+                                        setSelectedClient(client.client);
+                                        setActiveTab("clients");
+                                        fetchClientQueries(client.client, 1);
+                                      }}
+                                      onContextMenu={(e) => {
+                                        e.preventDefault();
+                                        copyToClipboard(client.client);
+                                      }}
+                                    >
+                                      {client.client}
+                                    </span>
+                                  </td>
+                                  <td className="p-3 text-sm">
+                                    <Badge
+                                      variant="secondary"
+                                      className="font-mono"
+                                    >
+                                      {client.query_count}
+                                    </Badge>
+                                  </td>
+                                  <td className="p-3 font-mono text-gray-500 text-xs">
+                                    {formatTimestamp(client.last_query)}
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+
+                        <PaginationControls
+                          page={domainPage}
+                          onPrevious={() =>
+                            setDomainPage((page) => Math.max(1, page - 1))
+                          }
+                          onNext={() => setDomainPage((page) => page + 1)}
+                          nextDisabled={domainClients.length < 20}
+                        />
                       </div>
-                    </div>
-                  ) : (
-                    <div className="text-center text-gray-500 py-8">
-                      Click on a domain to view which clients are querying it
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
+                    ) : (
+                      <div className="text-center text-gray-500 py-8">
+                        Click on a domain to view which clients are querying it
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              )}
             </div>
           </TabsContent>
 
@@ -1143,28 +1268,14 @@ export default function DNSDashboard() {
                         </table>
                       </div>
 
-                      <div className="flex justify-center gap-2">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() =>
-                            setCurrentPage(Math.max(1, currentPage - 1))
-                          }
-                          disabled={currentPage === 1}
-                        >
-                          Previous
-                        </Button>
-                        <span className="px-3 py-1 text-sm">
-                          Page {currentPage}
-                        </span>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => setCurrentPage(currentPage + 1)}
-                        >
-                          Next
-                        </Button>
-                      </div>
+                      <PaginationControls
+                        page={currentPage}
+                        onPrevious={() =>
+                          setCurrentPage((page) => Math.max(1, page - 1))
+                        }
+                        onNext={() => setCurrentPage((page) => page + 1)}
+                        nextDisabled={clientQueries.length < 20}
+                      />
                     </div>
                   ) : (
                     <div className="text-center text-gray-500 py-8">
@@ -1176,325 +1287,13 @@ export default function DNSDashboard() {
             </div>
           </TabsContent>
 
-          <TabsContent value="queries" className="space-y-6">
-            <Card>
-              <CardHeader>
-                <CardTitle>All DNS Queries</CardTitle>
-                <CardDescription>
-                  Recent DNS queries from all clients
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="-mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0">
-                  <table className="w-full whitespace-nowrap">
-                    <thead>
-                      <tr className="border-b border-border bg-muted/50">
-                        <th className="text-left p-3 font-medium text-sm text-muted-foreground w-48">
-                          Time
-                        </th>
-                        <th className="text-left p-3 font-medium text-sm text-muted-foreground w-32">
-                          Client
-                        </th>
-                        <th className="text-left p-3 font-medium text-sm text-muted-foreground w-80">
-                          Domain
-                        </th>
-                        <th className="text-right p-3 font-medium text-sm text-muted-foreground w-20">
-                          Type
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {allQueries.map((query, index) => (
-                        <tr
-                          key={index}
-                          className="border-b border-border hover:bg-accent/50 transition-colors"
-                        >
-                          <td className="p-3 font-mono text-slate-500 dark:text-slate-400 text-xs">
-                            {formatTimestamp(query.timestamp)}
-                          </td>
-                          <td className="p-3 font-mono text-blue-600 dark:text-blue-400 text-xs">
-                            <span
-                              className="cursor-pointer hover:text-blue-700 dark:hover:text-blue-300 transition-colors"
-                              title={`${query.client} (click to navigate, right-click to copy)`}
-                              onClick={() => {
-                                setSelectedClient(query.client);
-                                setActiveTab("clients");
-                                fetchClientQueries(query.client, 1);
-                              }}
-                              onContextMenu={(e) => {
-                                e.preventDefault();
-                                copyToClipboard(query.client);
-                              }}
-                            >
-                              {query.client}
-                            </span>
-                          </td>
-                          <td className="p-3 font-medium text-sm">
-                            <span
-                              className="truncate block cursor-pointer hover:text-blue-600 dark:hover:text-blue-400 transition-colors text-slate-900 dark:text-slate-100"
-                              title={`${query.domain} (click to copy)`}
-                              onClick={() => copyToClipboard(query.domain)}
-                            >
-                              {query.domain}
-                            </span>
-                          </td>
-                          <td className="p-3 text-right">
-                            <div className="flex justify-end items-center gap-2">
-                              <Badge variant="outline" className="text-xs">
-                                {query.type}
-                              </Badge>
-                              {query.type === "UNKNOWN" && (
-                                <Badge
-                                  variant="destructive"
-                                  className="text-xs"
-                                >
-                                  UNKNOWN
-                                </Badge>
-                              )}
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+          <QueriesTab
+            queryTypes={queryTypes}
+            refreshSeconds={autoRefresh ? refreshInterval : 0}
+            copyToClipboard={copyToClipboard}
+            formatTimestamp={formatTimestamp}
+          />
 
-                <div className="flex justify-center gap-2 mt-4">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => {
-                      const newPage = Math.max(1, currentPage - 1);
-                      setCurrentPage(newPage);
-                      fetchAllQueries(newPage);
-                    }}
-                    disabled={currentPage === 1}
-                  >
-                    Previous
-                  </Button>
-                  <span className="px-3 py-1 text-sm">Page {currentPage}</span>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => {
-                      const newPage = currentPage + 1;
-                      setCurrentPage(newPage);
-                      fetchAllQueries(newPage);
-                    }}
-                  >
-                    Next
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
-          </TabsContent>
-
-          <TabsContent value="search" className="space-y-6">
-            <Card>
-              <CardHeader>
-                <CardTitle>Domain Search with DNS Resolution</CardTitle>
-                <CardDescription>
-                  Search for domains and see live DNS resolution status
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-4">
-                  <div className="flex flex-col gap-2 sm:flex-row">
-                    <div className="flex-1">
-                      <Input
-                        value={searchTerm}
-                        onChange={(e) => setSearchTerm(e.target.value)}
-                        placeholder="Enter domain name (e.g., google.com or just google)"
-                        className="w-full"
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter") {
-                            setSearchPage(1);
-                            searchDomains(searchTerm, 1);
-                          }
-                        }}
-                      />
-                    </div>
-                    <Button
-                      onClick={() => {
-                        setSearchPage(1);
-                        searchDomains(searchTerm, 1);
-                      }}
-                      disabled={isSearching || !searchTerm.trim()}
-                      className="flex items-center gap-2"
-                    >
-                      <Search
-                        className={`h-4 w-4 ${isSearching ? "animate-spin" : ""}`}
-                      />
-                      {isSearching ? "Resolving..." : "Search"}
-                    </Button>
-                  </div>
-
-                  {isSearching && (
-                    <div className="flex items-center justify-center py-8 text-blue-600 dark:text-blue-400">
-                      <div className="flex items-center gap-3">
-                        <div className="w-5 h-5 border-2 border-blue-600 dark:border-blue-400 border-t-transparent rounded-full animate-spin"></div>
-                        <span className="text-sm font-medium">
-                          Searching domains and resolving DNS...
-                        </span>
-                      </div>
-                    </div>
-                  )}
-
-                  {searchResults.length > 0 && (
-                    <div className="space-y-3">
-                      {searchResults.map((result, index) => {
-                        const { domain, type, resolution } = result;
-                        const [statusClassName, statusIcon] =
-                          resolutionStatusStyles[resolution.status] ??
-                          resolutionStatusStyles.default;
-
-                        return (
-                          <div
-                            key={index}
-                            className="rounded-lg border p-3 hover:bg-muted/50 sm:p-4"
-                          >
-                            <div className="flex items-start gap-4">
-                              <div className="flex-1 min-w-0">
-                                <div className="mb-2 flex flex-wrap items-center gap-2 sm:gap-3">
-                                  <span
-                                    className="font-mono font-semibold cursor-pointer hover:text-blue-600 dark:hover:text-blue-400 transition-colors truncate text-slate-900 dark:text-slate-100"
-                                    title={`${domain} (click to copy)`}
-                                    onClick={() => copyToClipboard(domain)}
-                                  >
-                                    {domain}
-                                  </span>
-                                  <Badge variant="outline" className="text-xs">
-                                    {type}
-                                  </Badge>
-                                  <div
-                                    className={`flex items-center gap-2 rounded-full px-2 py-1 text-xs font-medium ${statusClassName}`}
-                                  >
-                                    <span>{statusIcon}</span>
-                                    <span className="capitalize">
-                                      {resolution.status}
-                                    </span>
-                                    <span className="text-slate-500 dark:text-slate-400">
-                                      ({resolution.duration}ms)
-                                    </span>
-                                  </div>
-                                </div>
-
-                                {resolution.status === "success" &&
-                                  resolution.records.length > 0 && (
-                                    <div className="space-y-1">
-                                      <div className="text-xs text-slate-500 dark:text-slate-400 mb-1">
-                                        {type} Records:
-                                      </div>
-                                      {resolution.records.map(
-                                        (record, recordIndex) => (
-                                          <div
-                                            key={recordIndex}
-                                            className="flex items-center gap-2"
-                                          >
-                                            <Badge
-                                              variant="outline"
-                                              className="text-xs font-mono"
-                                            >
-                                              {record}
-                                            </Badge>
-                                            <Button
-                                              variant="ghost"
-                                              size="sm"
-                                              className="h-5 w-5 p-0 hover:bg-accent"
-                                              onClick={() =>
-                                                copyToClipboard(record)
-                                              }
-                                              title="Copy record"
-                                            >
-                                              <span className="text-xs">
-                                                📋
-                                              </span>
-                                            </Button>
-                                          </div>
-                                        ),
-                                      )}
-                                    </div>
-                                  )}
-
-                                {resolution.status === "blocked" && (
-                                  <div className="flex items-center gap-2 text-red-600 dark:text-red-400 text-xs">
-                                    <Shield className="h-3 w-3" />
-                                    <span>
-                                      Domain appears to be blocked or
-                                      non-existent
-                                    </span>
-                                  </div>
-                                )}
-
-                                {resolution.status === "error" &&
-                                  resolution.error && (
-                                    <div className="flex items-center gap-2 text-orange-600 dark:text-orange-400 text-xs">
-                                      <AlertTriangle className="h-3 w-3" />
-                                      <span>{resolution.error}</span>
-                                    </div>
-                                  )}
-                              </div>
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
-
-                  {searchTerm &&
-                    searchResults.length === 0 &&
-                    !isSearching && (
-                      <div className="text-center text-slate-500 dark:text-slate-400 py-8">
-                        No results found for "{searchTerm}"
-                      </div>
-                    )}
-
-                  {!searchTerm && (
-                    <div className="space-y-2 py-8 text-center text-muted-foreground">
-                      <Search className="mx-auto h-5 w-5" />
-                      <div>Enter a domain name to search and resolve it.</div>
-                      <div className="text-xs">
-                        This will show if domains are blocked, their IP
-                        addresses, and resolution status
-                      </div>
-                    </div>
-                  )}
-
-                  {searchResults.length > 0 && (
-                    <div className="flex justify-center gap-2 mt-4">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => {
-                          const newPage = Math.max(1, searchPage - 1);
-                          setSearchPage(newPage);
-                          searchDomains(searchTerm, newPage);
-                        }}
-                        disabled={searchPage === 1 || isSearching}
-                      >
-                        Previous
-                      </Button>
-                      <span className="px-3 py-1 text-sm">
-                        Page {searchPage}
-                      </span>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => {
-                          const newPage = searchPage + 1;
-                          setSearchPage(newPage);
-                          searchDomains(searchTerm, newPage);
-                        }}
-                        disabled={isSearching}
-                      >
-                        Next
-                      </Button>
-                    </div>
-                  )}
-                </div>
-              </CardContent>
-            </Card>
-          </TabsContent>
         </Tabs>
       </div>
     </main>
