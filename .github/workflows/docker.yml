@@ -13,7 +13,53 @@ env:
   IMAGE_NAME: ${{ github.repository }}
 
 jobs:
+  frontend:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 26
+          cache: npm
+          cache-dependency-path: page/package-lock.json
+
+      - name: Restore Next.js build cache
+        uses: actions/cache@v4
+        with:
+          path: page/.next/cache
+          key: ${{ runner.os }}-nextjs-${{ hashFiles('page/package-lock.json') }}-${{ hashFiles('page/**') }}
+          restore-keys: |
+            ${{ runner.os }}-nextjs-${{ hashFiles('page/package-lock.json') }}-
+
+      - name: Install dependencies
+        working-directory: page
+        run: npm ci --legacy-peer-deps
+
+      - name: Build frontend
+        working-directory: page
+        env:
+          BACKEND_URL: http://127.0.0.1:8080
+        run: npm run build
+
+      - name: Package frontend
+        run: tar -czf frontend-build.tar.gz -C page .next/standalone .next/static public
+
+      - name: Upload frontend
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-${{ github.sha }}
+          path: frontend-build.tar.gz
+          compression-level: 0
+          retention-days: 1
+
   build:
+    needs: frontend
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -23,8 +69,15 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v7
 
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v4
+      - name: Download frontend
+        uses: actions/download-artifact@v4
+        with:
+          name: frontend-${{ github.sha }}
+
+      - name: Extract frontend
+        run: |
+          mkdir frontend-build
+          tar -xzf frontend-build.tar.gz -C frontend-build
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
@@ -53,7 +106,8 @@ jobs:
         uses: docker/build-push-action@v7
         with:
           context: .
-          platforms: linux/amd64,linux/arm64
+          platforms: linux/amd64
+          build-args: FRONTEND_STAGE=frontend-prebuilt
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}

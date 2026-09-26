@@ -1,3 +1,5 @@
+ARG FRONTEND_STAGE=web-build
+
 # ---------- Frontend build ----------
 FROM node:26-alpine AS web-build
 WORKDIR /app/page
@@ -10,6 +12,12 @@ COPY page/ .
 ENV BACKEND_URL=http://127.0.0.1:8080
 RUN npm run build
 
+# ---------- Prebuilt frontend from CI ----------
+FROM scratch AS frontend-prebuilt
+COPY frontend-build/ /app/page/
+
+FROM ${FRONTEND_STAGE} AS frontend
+
 # ---------- Backend build ----------
 FROM golang:1.27-alpine AS api-build
 WORKDIR /src
@@ -17,7 +25,7 @@ WORKDIR /src
 RUN apk add --no-cache gcc musl-dev sqlite-dev
 COPY go.mod go.sum ./
 RUN go mod download
-COPY . .
+COPY main.go ./
 # Build with CGO enabled for SQLite
 ENV CGO_ENABLED=1 GOOS=linux
 RUN go build -o /out/mikrotik-dns ./main.go
@@ -33,9 +41,9 @@ RUN apk add --no-cache tini ca-certificates sqlite-libs tzdata
 COPY --from=api-build /out/mikrotik-dns /usr/local/bin/mikrotik-dns
 
 # Copy Next.js standalone build
-COPY --from=web-build /app/page/.next/standalone ./page/
-COPY --from=web-build /app/page/public ./page/public
-COPY --from=web-build /app/page/.next/static ./page/.next/static
+COPY --from=frontend /app/page/.next/standalone ./page/
+COPY --from=frontend /app/page/public ./page/public
+COPY --from=frontend /app/page/.next/static ./page/.next/static
 
 # Set environment variables
 ENV PORT=3000 \

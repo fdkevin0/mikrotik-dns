@@ -16,6 +16,7 @@ page/node_modules
 page/.next
 page/frontend.log
 page/pnpm-lock.yaml
+frontend-build.tar.gz
 
 # Go
 mikrotik-dns
