@@ -27,8 +27,9 @@ A comprehensive DNS analytics solution that receives DNS logs from MikroTik rout
 
 - **Overview Page**: Modern cards with gradients, IPv4 vs IPv6 adoption, query rates
 - **Top Domains**: Visual ranking with progress bars and interactive selection
+- **PSL Domain Groups**: Group subdomains by registrable domain, including suffixes such as `.com.cn` and `.co.jp`
 - **Client Analysis**: Most active clients with detailed query history
-- **Domain Search**: Powerful search with partial matching capabilities
+- **Unified Query Search**: Exact, suffix, and contains matching with advanced filters
 - **Query Types**: Distribution analysis with special highlighting for unknown queries
 - **Network Insights**: Query rates, resolution success rates, client distribution
 
@@ -45,7 +46,7 @@ A comprehensive DNS analytics solution that receives DNS logs from MikroTik rout
 - **Docker Containerized**: Complete containerization with Docker Compose
 - **API Proxy**: Single port deployment (3000) with backend proxying
 - **Optimized Backend**: Efficient Go API with SQLite and proper CORS
-- **Auto-purging**: Automatically removes data older than 24 hours
+- **Configurable retention**: Automatically removes expired data (24 hours by default)
 - **Error Handling**: Robust error handling and null-safe operations
 
 ---
@@ -117,27 +118,40 @@ make single-down
 
 Configure your MikroTik router to send DNS logs:
 
+The receiver accepts RouterOS `syslog` remote logs with BSD or ISO 8601
+timestamps. ISO 8601 is recommended. RouterOS `default` and CEF remote formats
+are not parsed; their original lines are still retained in the raw-log store.
+
 ### Option 1: WebFig/Winbox GUI
 
 1. Go to **System → Logging**
-2. Add new rule:
-   - **Topics**: `dns`
-   - **Action**: `remote`
+2. Configure the `remote` action:
    - **Remote Address**: `<your_server_ip>`
    - **Remote Port**: `5354`
+   - **Remote Log Format**: `syslog`
+   - **Syslog Time Format**: `iso8601`
+3. Add a new rule:
+   - **Topics**: `dns,!packet`
+   - **Action**: `remote`
 
 ### Option 2: Command Line Interface
 
 ```shell
-/system logging add topics=dns action=remote remote=<your_server_ip> remote-port=5354
+/system logging action set [find where name="remote"] remote=<your_server_ip> remote-port=5354 remote-log-format=syslog syslog-time-format=iso8601
+/system logging add topics=dns,!packet action=remote
 ```
 
 ### Expected Log Format
 
 ```
-2025-01-15 14:23:45 dns query from 192.168.1.100: #12345 google.com. A
-2025-01-15 14:23:46 dns query from 192.168.1.100: #12346 facebook.com. AAAA
+<30>2025-01-15T14:23:45Z router dns,info dns query from 192.168.1.100: #12345 google.com. A
+<30>2025-01-15T14:23:45Z router dns,info dns done query: #12345 google.com 142.250.72.14
+<30>Jan 15 14:23:46 router dns,info dns local query: #12346 cloud.mikrotik.com. AAAA
 ```
+
+The receiver stores query IDs, local router queries, and the raw completion
+message. Packet-level `dns,packet` debug output is intentionally excluded; its
+multi-line packet dump is not part of the query log format supported here.
 
 ---
 
@@ -165,6 +179,8 @@ graph LR
 ### Core Statistics
 
 - `GET /api/top-domains` - Most queried domains
+- `GET /api/top-domain-groups` - Most queried registrable domains using the Public Suffix List
+- `GET /api/domain-group-members?group=<domain>&page=1` - Full domains within a registrable domain group
 - `GET /api/query-types` - DNS query type distribution
 - `GET /api/clients` - Most active client IPs
 - `GET /api/unique-clients-count` - Count of unique clients
@@ -174,13 +190,13 @@ graph LR
 
 - `GET /api/queries-per-minute` - Average queries per minute
 - `GET /api/ipv4-vs-ipv6` - IPv4 vs IPv6 usage statistics
-- `GET /api/all-queries?page=1&page_size=50` - Recent queries with pagination
+- `GET /api/queries?page=1&domain=example.com&domain_mode=suffix` - Paginated query history with exact, suffix, or contains matching and advanced filters
+- `GET /api/raw-logs?from=<unix>&to=<unix>&limit=<optional>` - Download retained source logs as JSONL
 
 ### Interactive Features
 
 - `GET /api/client-queries?client=<ip>&page=1` - Queries from specific client
-- `GET /api/domain-clients?domain=<domain>&page=1` - Clients querying specific domain
-- `GET /api/domain-queries?domain=<domain>&partial=true&page=1` - Search domains
+- `GET /api/domain-clients?domain=<domain>&suffix=true&page=1` - Clients querying a domain, optionally including all subdomains
 
 ---
 
@@ -206,19 +222,13 @@ graph LR
 - **Query History**: Detailed query log for each client
 - **Domain Breakdown**: What domains each client is accessing
 
-### Search Page
+### Queries Page
 
-- **Live DNS Resolution**: Real-time DNS lookup for search results matching the original query type
-- **Query Type Specific**: Resolves A, AAAA, CNAME, TXT, MX, NS, PTR records based on logged query type
-- **Block Detection**: Identifies blocked or non-existent domains
-- **Performance Metrics**: Shows DNS resolution time for each domain
-- **Copy Functionality**: One-click copy for domains and DNS records
-
-### All Queries Page
-
-- **Complete Query Log**: Chronological list of all DNS queries
-- **Table Layout**: Organized columns for time, client, domain, type
-- **Responsive Design**: Proper column widths regardless of data length
+- **Unified Search**: Domain contains, exact, and label-safe suffix matching
+- **Advanced Filters**: Client, query type, RouterOS query ID, and time range
+- **Query Details**: Click a row to inspect query/completion times, PSL domain, query ID, and raw RouterOS result
+- **Live DNS Resolution**: Re-run the selected query type from the details dialog
+- **Raw Log Export**: Download original UDP lines as JSONL for debugging; the selected From/To values define the export segment
 
 ---
 
@@ -228,6 +238,7 @@ graph LR
 
 - `BACKEND_URL`: Internal backend URL for API proxy (default: `http://mikrotik-dns-backend:8080`)
 - `DATABASE_PATH`: SQLite database location (default: `/data/queries.db`)
+- `DATA_RETENTION_HOURS`: Number of hours retained and shown in analytics (default: `24`, positive integers only)
 - `DNS_SERVER`: Custom DNS server for resolution testing (optional, uses system default if not set)
 
 ### Auto-refresh Settings
@@ -247,7 +258,7 @@ graph LR
 ```bash
 # Backend
 go mod tidy
-go run main.go
+go run .
 
 # Frontend (in separate terminal)
 cd page
@@ -289,6 +300,7 @@ services:
     environment:
       - DNS_SERVER=${DNS_SERVER:-}
       - DATABASE_PATH=/data/queries.db
+      - DATA_RETENTION_HOURS=${DATA_RETENTION_HOURS:-24}
       - PORT=3000
       - NODE_ENV=production
     healthcheck:
@@ -302,6 +314,7 @@ services:
 ### Environment Variables
 
 - `DATABASE_PATH`: SQLite database location (default: `/data/queries.db`)
+- `DATA_RETENTION_HOURS`: Number of hours retained and shown in analytics (default: `24`)
 - `DNS_SERVER`: Custom DNS server for resolution testing (optional)
 - `PORT`: Frontend port (default: `3000`)
 - `NODE_ENV`: Node.js environment (default: `production`)
@@ -310,17 +323,40 @@ services:
 
 ## 🗄️ Database Schema
 
-SQLite database with automatic cleanup (24h retention):
+SQLite database with configurable automatic cleanup and indexes for time-window, domain, and client queries. Database migrations are intentionally not provided; remove or recreate a database created by an older release before starting this version.
 
 ```sql
 CREATE TABLE queries (
     id INTEGER PRIMARY KEY,
-    timestamp INTEGER,
-    client TEXT,
-    domain TEXT,
-    type TEXT
+    timestamp INTEGER NOT NULL,
+    client TEXT NOT NULL,
+    domain TEXT NOT NULL,
+    type TEXT NOT NULL,
+    query_id INTEGER NOT NULL,
+    result TEXT,
+    completed_at INTEGER,
+    source TEXT NOT NULL,
+    reverse_domain TEXT NOT NULL
 );
+
+CREATE TABLE raw_logs (
+    id INTEGER PRIMARY KEY,
+    received_at INTEGER NOT NULL,
+    source TEXT NOT NULL,
+    message TEXT NOT NULL
+);
+
+CREATE INDEX idx_queries_timestamp ON queries(timestamp);
+CREATE INDEX idx_queries_domain_timestamp_client ON queries(domain COLLATE NOCASE, timestamp, client);
+CREATE INDEX idx_queries_client_timestamp ON queries(client, timestamp);
+CREATE INDEX idx_queries_reverse_domain_timestamp ON queries(reverse_domain, timestamp);
+CREATE INDEX idx_queries_source_query_id_timestamp ON queries(source, query_id, timestamp);
+CREATE INDEX idx_raw_logs_received_at ON raw_logs(received_at);
 ```
+
+Raw logs use the same `DATA_RETENTION_HOURS` cleanup window as parsed queries.
+They preserve the complete received line, including the syslog envelope, even
+when the DNS parser does not recognize the message.
 
 ---
 
@@ -331,12 +367,13 @@ CREATE TABLE queries (
 1. Check MikroTik logging configuration
 2. Verify UDP port 5354 is accessible
 3. Check container logs: `docker compose logs -f`
+4. Download a raw-log segment from the Queries page to inspect the exact RouterOS format
 
 ### DNS Resolution Issues
 
 - Monitor "Failed Queries" card for UNKNOWN query types
 - Check "Resolution Rate" in Activity Summary
-- Use Domain Search to investigate specific issues
+- Open a query's details and use **Resolve now** to investigate specific issues
 
 ### Performance Issues
 
