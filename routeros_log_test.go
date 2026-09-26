@@ -17,13 +17,15 @@ func TestHandleLineRecordsRouterOSFields(t *testing.T) {
 	handleLineFrom(db, "198.51.100.1", "<30>2026-09-26T12:00:01Z router dns,info dns done query: #22433118 www.example.com 192.0.2.50")
 	handleLineFrom(db, "198.51.100.1", "<30>Sep 26 12:00:02 router dns,info dns local query: #33347 cloud.mikrotik.com. AAAA")
 	handleLineFrom(db, "198.51.100.1", "<30>2026-09-26T12:00:03Z router dns,info dns query from 2001:db8::1: #44 service.example. UNKNOWN (65)")
+	handleLineFrom(db, "198.51.100.1", "<30>Sep 27 02:47:37 RB5009UG home1201 query from 172.19.20.6: #983764 update.pan.baidu.com. A")
+	handleLineFrom(db, "198.51.100.1", "<30>Sep 27 02:47:37 RB5009UG home1201 done query: #983764 update.pan.baidu.com. 110.242.69.43")
 
 	records, err := queryRecords(db, QueryFilter{From: 0, PageSize: 10})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(records) != 3 {
-		t.Fatalf("record count = %d, want 3", len(records))
+	if len(records) != 4 {
+		t.Fatalf("record count = %d, want 4", len(records))
 	}
 	byID := make(map[int64]QueryRecord)
 	for _, record := range records {
@@ -42,6 +44,10 @@ func TestHandleLineRecordsRouterOSFields(t *testing.T) {
 	}
 	if got := byID[44].Type; got != "HTTPS" {
 		t.Errorf("unknown type resolution = %q, want HTTPS", got)
+	}
+	spacedName := byID[983764]
+	if spacedName.Client != "172.19.20.6" || spacedName.Domain != "update.pan.baidu.com" || spacedName.Result == nil {
+		t.Errorf("spaced router name query = %+v", spacedName)
 	}
 }
 

@@ -11,12 +11,12 @@ import (
 )
 
 var (
-	queryLineRE       = regexp.MustCompile(`^dns (?:(?:query from (.+?))|local query): #(\d+) ([^ ]+)\. (\w+(?: \(\d+\))?)$`)
-	doneLineRE        = regexp.MustCompile(`^dns done query: #(\d+) (.+)$`)
+	queryLineRE       = regexp.MustCompile(`^(?:(?:query from (.+?))|local query): #(\d+) ([^ ]+)\. (\w+(?: \(\d+\))?)$`)
+	doneLineRE        = regexp.MustCompile(`^done query: #(\d+) (.+)$`)
 	syslogPriorityRE  = regexp.MustCompile(`^<\d{1,3}>`)
 	iso8601TimeRE     = regexp.MustCompile(`\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})`)
 	bsdSyslogTimeRE   = regexp.MustCompile(`(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+[ 0-9]\d \d{2}:\d{2}:\d{2}`)
-	dnsMessageMarkers = []string{"dns query from ", "dns local query: ", "dns done query: "}
+	dnsMessageMarkers = []string{" query from ", " local query: ", " done query: "}
 )
 
 func handleLineFrom(db *sql.DB, source, line string) {
@@ -72,8 +72,8 @@ func parseSyslogLine(line string) (time.Time, string, bool) {
 	}
 	messageIndex := -1
 	for _, marker := range dnsMessageMarkers {
-		if index := strings.Index(line, marker); index >= 0 && (messageIndex == -1 || index < messageIndex) {
-			messageIndex = index
+		if index := strings.Index(line, marker); index >= 0 && (messageIndex == -1 || index+1 < messageIndex) {
+			messageIndex = index + 1
 		}
 	}
 	if messageIndex == -1 {
